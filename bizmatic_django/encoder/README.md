@@ -42,7 +42,7 @@ configuration. The server receives the SDK's small standard environment plus the
 explicit variables. Legacy `ENCODER_STDIO_SERVERS` profiles remain readable for
 existing connections; editing them replaces the profile with frontend-managed details.
 
-No new login, OAuth, roles, or Bizmatic token is required. Encoder is disabled by
+No new login, OAuth, roles, or AuditCounter token is required. Encoder is disabled by
 default. When enabled, middleware checks both the actual peer and Host for
 loopback, independent of forwarded headers. Bind Django to `127.0.0.1`; do not
 publish or reverse proxy these unauthenticated pages. Local process/connection

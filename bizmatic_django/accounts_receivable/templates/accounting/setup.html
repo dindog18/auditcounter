@@ -17,7 +17,7 @@
 {{ finance_config|json_script:'finance-config' }}
 {{ finance_state|json_script:'finance-state' }}
 {% endblock %}
-{% block workspace_footer %}<span>Bizmatic · {{ workspace_name }}</span><span>Record first · Review before saving</span>{% endblock %}
+{% block workspace_footer %}<span>AuditCounter · {{ workspace_name }}</span><span>Record first · Review before saving</span>{% endblock %}
 {% block scripts %}
 <script src="{% static 'accounting/api.js' %}?v=http-errors-1" defer></script><script src="{% static 'accounting/configuration-delete.js' %}?v=delete-2" defer></script>
 <script src="{% static 'accounting/setup/annotations.js' %}?v=record-first-2" defer></script>

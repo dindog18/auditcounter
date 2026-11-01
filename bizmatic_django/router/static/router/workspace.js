@@ -35,7 +35,7 @@
       else link.removeAttribute("aria-current");
     });
     const heading = ui.root.querySelector("h1");
-    if (heading) document.title = `${heading.textContent} | Bizmatic`;
+    if (heading) document.title = `${heading.textContent} | AuditCounter`;
     if (focus) {
       const next = document.getElementById(focus);
       if (next) { next.focus({ preventScroll: true }); if (selection !== null && next instanceof HTMLInputElement) next.setSelectionRange(selection, selection); }

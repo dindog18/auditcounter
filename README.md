@@ -1,8 +1,13 @@
-# Bizmatic
+# AuditCounter
 
-Bizmatic is a Django workspace for extracting business documents, preparing accounting data, and reconciling accounts payable and receivable. It brings document review, PostgreSQL source configuration, and accounting workflows into one application.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="bizmatic_django/document_extraction/static/document_extraction/brand/auditcounter-symbol-dark.svg">
+  <img src="bizmatic_django/document_extraction/static/document_extraction/brand/auditcounter-symbol.svg" width="64" height="64" alt="AuditCounter logo">
+</picture>
 
-> **Project status:** Bizmatic currently runs provider calls and database migrations within web requests. Its workspaces do not provide application-level authentication or organization isolation; restrict access at the hosting layer before making an instance available to others. No project-wide license has been selected. Bundled third-party assets retain their own license terms.
+AuditCounter is a Django workspace for extracting business documents, preparing accounting data, and reconciling accounts payable and receivable. It brings document review, PostgreSQL source configuration, and accounting workflows into one application.
+
+> **Project status:** AuditCounter currently runs provider calls and database migrations within web requests. Its workspaces do not provide application-level authentication or organization isolation; restrict access at the hosting layer before making an instance available to others. No project-wide license has been selected. Bundled third-party assets retain their own license terms.
 
 ## Features
 
@@ -20,6 +25,12 @@ See the [query builder guide](bizmatic_django/accounts_receivable/QUERY_BUILDER.
 - SQLite for a local application database, or a provisioned PostgreSQL application database.
 - PostgreSQL 14 or newer for external database extraction. Source connection profiles are configured in the application.
 - An optional LLM provider and suitable model for provider-dependent extraction, routing, or setup assistance. Local browsing and database query preparation do not require an LLM.
+
+## Visual identity
+
+AuditCounter retains the approved Modern Minimalist identity: charcoal `#252629`, slate `#45556C`, cobalt `#3658D4`, and bundled Inter typography. The new geometric A mark pairs an open counter with an aligned accent block. Light and dark SVG marks, PNG exports, favicons, and application icons live in the [brand asset directory](bizmatic_django/document_extraction/static/document_extraction/brand/). See the [asset and usage guide](bizmatic_django/document_extraction/static/document_extraction/brand/README.md).
+
+This is a presentation rebrand. The existing `bizmatic_django` package and directory, credential-key location, browser preference/draft keys, and internal JavaScript names are retained for compatibility. Existing installations can update without renaming databases, moving secrets, or losing saved setup progress. Application routes and business logic are unchanged.
 
 ## Getting started
 

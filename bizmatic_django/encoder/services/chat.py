@@ -1,4 +1,4 @@
-"""Job-scoped AI suggestions share Bizmatic's provider adapter and assistant settings."""
+"""Job-scoped AI suggestions share AuditCounter's provider adapter and assistant settings."""
 import json
 import re
 import logging

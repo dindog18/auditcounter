@@ -2,7 +2,7 @@
 {% load static %}
 {% block extra_styles %}<link rel="stylesheet" href="{% static 'router/workspace.css' %}?v=concept-c-1">{% endblock %}
 {% block workspace_title %}Document routing workspace{% endblock %}
-{% block workspace_footer %}<span>Bizmatic · Routing workspace</span><span>Saved routing configuration and history</span>{% endblock %}
+{% block workspace_footer %}<span>AuditCounter · Routing workspace</span><span>Saved routing configuration and history</span>{% endblock %}
 {% block breadcrumbs %}<nav aria-label="Breadcrumb"><ol class="breadcrumb fs-10 mb-3"><li class="breadcrumb-item"><a href="{% url 'ROUTER:queue' %}">Router</a></li><li class="breadcrumb-item active" aria-current="page">{{ page_title }}</li></ol></nav>{% endblock %}
 {% block content %}
 <div id="router-app">
@@ -23,8 +23,8 @@
 {% endblock %}
 {% block scripts %}
 <script src="{% static 'router/state.js' %}?v=routing-encoder-prep-6" defer></script>
-<script src="{% static 'router/configuration.js' %}?v=routing-encoder-prep-6" defer></script>
+<script src="{% static 'router/configuration.js' %}?v=auditcounter-1" defer></script>
 <script src="{% static 'router/review.js' %}?v=routing-encoder-prep-6" defer></script>
 <script src="{% static 'router/rerun.js' %}?v=routing-encoder-prep-6" defer></script>
-<script src="{% static 'router/workspace.js' %}?v=routing-encoder-prep-6" defer></script>
+<script src="{% static 'router/workspace.js' %}?v=auditcounter-1" defer></script>
 {% endblock %}

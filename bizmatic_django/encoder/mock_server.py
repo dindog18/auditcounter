@@ -11,7 +11,7 @@ class ReceiptResult(BaseModel):
     warehouse_id: int
     request_key: str
 
-server = FastMCP("Bizmatic synthetic Encoder fixture")
+server = FastMCP("AuditCounter synthetic Encoder fixture")
 
 
 @server.tool()

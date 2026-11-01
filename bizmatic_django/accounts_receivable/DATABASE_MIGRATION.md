@@ -1,6 +1,6 @@
 # Database migration and data updates in AP/AR
 
-Database extraction copies mapped external PostgreSQL values into Bizmatic's local
+Database extraction copies mapped external PostgreSQL values into AuditCounter's local
 accounting models. All external queries run in read-only transactions. The source
 database is never modified by migration or Update data.
 

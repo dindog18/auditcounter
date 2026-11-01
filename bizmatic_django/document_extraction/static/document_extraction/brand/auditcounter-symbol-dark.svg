@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-labelledby="title">
+  <title id="title">AuditCounter</title>
+  <path fill="#F5F5F0" fill-rule="evenodd" d="M4 28V12L12 4H24L28 8V28H22V22H10V28H4ZM10 16H22V10H14L10 14V16Z" clip-rule="evenodd"/>
+  <path fill="#A9BAFF" d="M22 22H28V28H22Z"/>
+</svg>

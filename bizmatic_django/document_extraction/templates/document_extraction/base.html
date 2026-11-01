@@ -4,8 +4,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ page_title }} | Bizmatic</title>
-  <link rel="icon" href="{% static 'document_extraction/brand/approved-canva-symbol.png' %}" type="image/png">
+  <title>{{ page_title }} | AuditCounter</title>
+  <link rel="icon" href="{% static 'document_extraction/brand/auditcounter-favicon-32.png' %}" sizes="32x32" type="image/png">
+  <link rel="icon" href="{% static 'document_extraction/brand/auditcounter-favicon.svg' %}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{% static 'document_extraction/brand/auditcounter-apple-touch-icon.png' %}" sizes="180x180">
   <link rel="preload" href="{% static 'document_extraction/brand/Inter-variable.ttf' %}" as="font" type="font/ttf" crossorigin>
   <script src="{% static 'document_extraction/brand/theme-init.js' %}"></script>
   <link rel="stylesheet" href="{% static 'document_extraction/falcon/assets/css/theme.min.css' %}">
@@ -13,7 +15,7 @@
   <link rel="stylesheet" href="{% static 'document_extraction/help-tour.css' %}?v=workspace-spacing-1">
   {% block extra_styles %}{% endblock %}
   <link rel="stylesheet" href="{% static 'document_extraction/brand/tokens.css' %}">
-  <link rel="stylesheet" href="{% static 'document_extraction/brand/workspace-theme.css' %}">
+  <link rel="stylesheet" href="{% static 'document_extraction/brand/workspace-theme.css' %}?v=auditcounter-1">
 </head>
 <body class="biz-app">
   <a class="skip-link" href="#page-content">Skip to content</a>
@@ -22,7 +24,7 @@
       <nav class="navbar navbar-light navbar-vertical navbar-expand-xl" aria-label="Main navigation">
         <div class="d-flex align-items-center">
           <a class="navbar-brand" href="{% url 'DOC_EXTRACTION:document_list' %}">
-            <span class="biz-brand"><img class="biz-brand-symbol" src="{% static 'document_extraction/brand/approved-canva-symbol.png' %}" width="32" height="32" alt=""><span>Bizmatic</span></span>
+            {% include 'document_extraction/includes/brand.html' %}
           </a>
         </div>
         <div class="collapse navbar-collapse" id="navbarVerticalCollapse">
@@ -48,17 +50,17 @@
             <ul class="navbar-nav flex-column mb-3" aria-label="Encoding and integrations"><li class="nav-item"><a class="nav-link {% if section == 'encoder' %}active{% endif %}" {% if section == 'encoder' %}aria-current="page"{% endif %} href="{% url 'ENCODER:dashboard' %}"><span class="nav-link-icon"><span class="fas fa-paper-plane" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Encoder</span></a></li></ul>
             <div class="navbar-vertical-label mt-3 mb-2 px-3">Manage</div>
             <ul class="navbar-nav flex-column mb-3"><li class="nav-item"><a class="nav-link {% if section == 'setup' %}active{% endif %}" href="{% url 'setup' %}" {% if section == 'setup' %}aria-current="page"{% endif %}><span class="nav-link-icon"><span class="fas fa-sliders-h" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Settings &amp; setup</span>{% if setup_missing %}<span class="biz-setup-count" aria-label="{{ setup_missing }} setup steps remaining">{{ setup_missing }}</span>{% endif %}</a></li></ul>
-            <div class="biz-sidebar-footer">Business, in order.<span>Bizmatic workspace</span></div>
+            <div class="biz-sidebar-footer">Business, in order.<span>AuditCounter workspace</span></div>
           </div>
         </div>
       </nav>
       <div class="content">
         <nav class="navbar navbar-light navbar-glass navbar-top navbar-expand" aria-label="Workspace header">
           <button class="btn navbar-toggler-humburger-icon navbar-toggler me-2" type="button" data-bs-toggle="collapse" data-bs-target="#navbarVerticalCollapse" aria-controls="navbarVerticalCollapse" aria-expanded="false" aria-label="Toggle navigation"><span class="navbar-toggle-icon"><span class="toggle-line"></span></span></button>
-          <a class="navbar-brand mobile-brand me-auto" href="{% url 'DOC_EXTRACTION:document_list' %}"><span class="biz-brand"><img class="biz-brand-symbol" src="{% static 'document_extraction/brand/approved-canva-symbol.png' %}" width="26" height="26" alt=""><span>Bizmatic</span></span></a>
+          <a class="navbar-brand mobile-brand me-auto" href="{% url 'DOC_EXTRACTION:document_list' %}">{% include 'document_extraction/includes/brand.html' %}</a>
           <span class="biz-header-title d-none d-xl-inline me-auto">{% block workspace_title %}Document workspace{% endblock %}</span>
           <button class="btn btn-sm btn-light biz-theme-toggle me-2" type="button" data-theme-toggle aria-label="Switch to dark theme" aria-pressed="false"><span class="fas fa-moon" data-theme-icon aria-hidden="true"></span></button>
-          <button type="button" class="btn btn-sm btn-light" data-help-start aria-haspopup="dialog" aria-controls="help-tour"><span class="fas fa-question-circle me-1" aria-hidden="true"></span>Help<span class="visually-hidden"> on this page</span></button>
+          <button type="button" class="btn btn-sm btn-light biz-help-toggle" data-help-start aria-label="Help on this page" aria-haspopup="dialog" aria-controls="help-tour"><span class="fas fa-question-circle" aria-hidden="true"></span><span class="biz-help-label ms-1">Help</span></button>
         </nav>
         <div id="page-content" tabindex="-1">
           {% for message in messages %}<div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>{% endfor %}
@@ -67,7 +69,7 @@
           {% block breadcrumbs %}{% endblock %}
           {% block content %}{% endblock %}
         </div>
-        <footer class="footer"><div class="d-flex flex-wrap justify-content-between gap-2 py-3 fs-10 text-600">{% block workspace_footer %}<span>Bizmatic <span class="mx-1">·</span> Document workspace</span><span>Documents, batches and extraction results</span>{% endblock %}</div></footer>
+        <footer class="footer"><div class="d-flex flex-wrap justify-content-between gap-2 py-3 fs-10 text-600">{% block workspace_footer %}<span>AuditCounter <span class="mx-1">·</span> Document workspace</span><span>Documents, batches and extraction results</span>{% endblock %}</div></footer>
       </div>
     </div>
   </main>

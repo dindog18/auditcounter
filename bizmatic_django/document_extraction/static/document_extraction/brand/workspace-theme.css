@@ -53,9 +53,12 @@
 }
 .biz-app .navbar-vertical > .d-flex { height: 80px; padding: 0 24px; flex-shrink: 0; }
 .biz-app .navbar-brand { margin: 0; padding: 0; color: var(--biz-color-text-primary); }
-.biz-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--biz-color-text-primary); font-size: 24px; font-weight: 700; letter-spacing: -.8px; }
-.biz-brand-symbol { display: block; object-fit: contain; flex-shrink: 0; }
-[data-bs-theme='dark'] .biz-brand-symbol { background: #fff; border-radius: 4px; }
+.biz-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--biz-color-text-primary); font-size: 20px; font-weight: 600; letter-spacing: -.6px; line-height: 1; white-space: nowrap; }
+.biz-brand-symbol { display: block; width: 32px; height: 32px; flex-shrink: 0; }
+.biz-brand-symbol img { display: block; width: 100%; height: 100%; }
+.biz-brand-symbol .biz-brand-dark { display: none; }
+[data-bs-theme='dark'] .biz-brand-symbol .biz-brand-light { display: none; }
+[data-bs-theme='dark'] .biz-brand-symbol .biz-brand-dark { display: block; }
 .biz-app .navbar-vertical .navbar-collapse { width: 100%; height: calc(100dvh - 80px)!important; margin: 0; background: var(--biz-color-bg-surface); }
 .biz-app .navbar-vertical .navbar-collapse.collapsing { transition: none; }
 .biz-app .navbar-vertical .navbar-vertical-content { width: 100%; height: 100%; padding: 0 12px 24px; display: flex; flex-direction: column; overflow-y: auto; }
@@ -165,6 +168,7 @@
   .biz-app #page-content { padding: 24px; }
   .biz-app .navbar-top { padding: 8px 24px; }
   .biz-app .mobile-brand .biz-brand { font-size: 20px; }
+  .biz-app .mobile-brand .biz-brand-symbol { width: 28px; height: 28px; }
   .biz-app .biz-sidebar-footer { padding-top: 20px; }
   .biz-app .finance-grid { grid-template-columns: minmax(0,1fr); }
   .biz-app .biz-settings-grid { gap: 16px; }
@@ -251,3 +255,15 @@
 .biz-app .text-primary { color: var(--biz-color-info-fg)!important; }
 
 .biz-app .text-primary { color: var(--biz-color-action-default)!important; }
+
+/* The longer wordmark stays readable beside navigation, theme and help controls. */
+@media (max-width:575.98px) {
+  .biz-app .biz-help-label { display: none; }
+  .biz-app .navbar-top :is(.biz-help-toggle,.biz-theme-toggle,.navbar-toggler) { width: 44px; min-width: 44px; height: 44px; padding: 8px; flex-shrink: 0; }
+}
+@media (max-width:359.98px) {
+  .biz-app .navbar-top { padding-inline: 12px; }
+  .biz-app .mobile-brand .biz-brand { font-size: 18px; gap: 4px; }
+  .biz-app .mobile-brand .biz-brand-symbol { width: 24px; height: 24px; }
+  .biz-app .navbar-top .biz-theme-toggle { margin-right: 4px!important; }
+}

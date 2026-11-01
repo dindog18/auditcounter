@@ -59,7 +59,7 @@ class RoutingDeletionTests(TestCase):
             response = self.client.get(reverse("ROUTER:" + name))
             self.assertEqual(response.status_code, 200)
             self.assertIn("delete", response.context["router_config"]["api"])
-            self.assertContains(response, "configuration.js?v=routing-encoder-prep-6")
+            self.assertContains(response, "router/configuration.js?v=")
             self.assertContains(response, "Delete opens a confirmation" if name == "destinations" else "Review the rule name")
 
 

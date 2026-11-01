@@ -7,7 +7,7 @@
 <div class="alert {% if setup_missing %}alert-warning{% else %}alert-success{% endif %}" role="status"><strong>{% if setup_missing %}{{ setup_missing }} setup step{{ setup_missing|pluralize }} need attention.{% else %}No active module needs setup.{% endif %}</strong> Only active modules contribute to reminders. These checks do not call external services or verify that a model is available.</div>
 <form method="post" action="{% url 'setup_modules' %}" class="card mb-4" id="module-selection">{% csrf_token %}
   <div class="card-header"><h2 class="fs-9 mb-0">Activate the modules you want to use</h2></div>
-  <div class="card-body"><p>Choose which modules contribute to setup reminders across this Bizmatic workspace. Inactive modules remain accessible; their records, routing and processing are unchanged.</p>
+  <div class="card-body"><p>Choose which modules contribute to setup reminders across this AuditCounter workspace. Inactive modules remain accessible; their records, routing and processing are unchanged.</p>
     <input type="hidden" name="revision" value="{{ setup_preferences_revision }}">
     <div class="setup-module-options">{% for group in setup_groups %}
       <label class="setup-module-option" for="activate-{{ group.key }}">
@@ -27,4 +27,4 @@
 </div>
 {% endblock %}
 
-{% block workspace_footer %}<span>Bizmatic · Setup</span><span>Workspace modules and setup guidance</span>{% endblock %}
+{% block workspace_footer %}<span>AuditCounter · Setup</span><span>Workspace modules and setup guidance</span>{% endblock %}
