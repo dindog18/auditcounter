@@ -1,8 +1,8 @@
 # AuditCounter
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="bizmatic_django/document_extraction/static/document_extraction/brand/auditcounter-symbol-dark.svg">
-  <img src="bizmatic_django/document_extraction/static/document_extraction/brand/auditcounter-symbol.svg" width="64" height="64" alt="AuditCounter logo">
+  <source media="(prefers-color-scheme: dark)" srcset="auditcounter_django/document_extraction/static/document_extraction/brand/auditcounter-symbol-dark.svg">
+  <img src="auditcounter_django/document_extraction/static/document_extraction/brand/auditcounter-symbol.svg" width="64" height="64" alt="AuditCounter logo">
 </picture>
 
 AuditCounter is a Django workspace for extracting business documents, preparing accounting data, and reconciling accounts payable and receivable. It brings document review, PostgreSQL source configuration, and accounting workflows into one application.
@@ -17,7 +17,7 @@ AuditCounter is a Django workspace for extracting business documents, preparing 
 - **Reviewed updates:** match prepared columns to accounting fields, validate a sample, review all matching source records, and explicitly confirm the migration or subsequent data update. Errors prevent the accounting update.
 - **Audit context:** retain extraction attempts, configuration revisions, and source identifiers alongside accounting records.
 
-See the [query builder guide](bizmatic_django/accounts_receivable/QUERY_BUILDER.md) for supported transformations and the [migration guide](bizmatic_django/accounts_receivable/DATABASE_MIGRATION.md) for review and update behavior.
+See the [query builder guide](auditcounter_django/accounts_receivable/QUERY_BUILDER.md) for supported transformations and the [migration guide](auditcounter_django/accounts_receivable/DATABASE_MIGRATION.md) for review and update behavior.
 
 ## Requirements
 
@@ -28,9 +28,9 @@ See the [query builder guide](bizmatic_django/accounts_receivable/QUERY_BUILDER.
 
 ## Visual identity
 
-AuditCounter retains the approved Modern Minimalist identity: charcoal `#252629`, slate `#45556C`, cobalt `#3658D4`, and bundled Inter typography. The new geometric A mark pairs an open counter with an aligned accent block. Light and dark SVG marks, PNG exports, favicons, and application icons live in the [brand asset directory](bizmatic_django/document_extraction/static/document_extraction/brand/). See the [asset and usage guide](bizmatic_django/document_extraction/static/document_extraction/brand/README.md).
+AuditCounter retains the approved Modern Minimalist identity: charcoal `#252629`, slate `#45556C`, cobalt `#3658D4`, and bundled Inter typography. The new geometric A mark pairs an open counter with an aligned accent block. Light and dark SVG marks, PNG exports, favicons, and application icons live in the [brand asset directory](auditcounter_django/document_extraction/static/document_extraction/brand/). See the [asset and usage guide](auditcounter_django/document_extraction/static/document_extraction/brand/README.md).
 
-This is a presentation rebrand. The existing `bizmatic_django` package and directory, credential-key location, browser preference/draft keys, and internal JavaScript names are retained for compatibility. Existing installations can update without renaming databases, moving secrets, or losing saved setup progress. Application routes and business logic are unchanged.
+This is a presentation rebrand. The Django project folder and Python package are named `auditcounter_django`. The credential-key location, browser preference/draft keys, and internal JavaScript names are retained for compatibility. Existing installations must move their local `.env` and any SQLite database from the old `bizmatic_django/` directory to `auditcounter_django/` after updating; Git does not move ignored files. Update service working directories, `DJANGO_SETTINGS_MODULE`, deployment commands, and any absolute paths to the new name. Keep the existing credential encryption key at its documented location and back up data before moving it. Browser preferences and application routes are unchanged.
 
 ## Getting started
 
@@ -41,12 +41,12 @@ python3.14 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-cp bizmatic_django/.env.example bizmatic_django/.env
+cp auditcounter_django/.env.example auditcounter_django/.env
 ```
 
-The copy command is for a new checkout. If `bizmatic_django/.env` already exists, keep it and compare its settings with the example instead of overwriting it.
+The copy command is for a new checkout. If `auditcounter_django/.env` already exists, keep it and compare its settings with the example instead of overwriting it.
 
-Edit `bizmatic_django/.env` and set a unique `DJANGO_SECRET_KEY`. For example, generate a key with:
+Edit `auditcounter_django/.env` and set a unique `DJANGO_SECRET_KEY`. For example, generate a key with:
 
 ```sh
 python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'
@@ -57,33 +57,33 @@ Quote the value in `.env`. The example uses SQLite, enables debug mode for local
 If you plan to save external database connections, provision the credential encryption key before creating connection profiles. The command preserves an existing key:
 
 ```sh
-python bizmatic_django/manage.py init_db_credential_key
+python auditcounter_django/manage.py init_db_credential_key
 ```
 
 Apply the application migrations and start the development server:
 
 ```sh
-python bizmatic_django/manage.py migrate
-python bizmatic_django/manage.py runserver
+python auditcounter_django/manage.py migrate
+python auditcounter_django/manage.py runserver
 ```
 
 Open [Documents](http://127.0.0.1:8000/documents/), [Accounts payable](http://127.0.0.1:8000/accounts-payable/), [Accounts receivable](http://127.0.0.1:8000/accounts-receivable/), or [Database connections](http://127.0.0.1:8000/databases/). A fresh installation starts without seeded business records. `migrate` updates tables in the configured application database; it does not create a PostgreSQL database or transfer existing records.
 
 ## Environment configuration
 
-The application loads **`bizmatic_django/.env`** automatically, regardless of the working directory. Process environment variables take precedence. Restart the process after editing the file.
+The application loads **`auditcounter_django/.env`** automatically, regardless of the working directory. Process environment variables take precedence. Restart the process after editing the file.
 
 | File or setting | Purpose |
 | --- | --- |
-| [`bizmatic_django/.env.example`](bizmatic_django/.env.example) | Tracked template with placeholders, defaults, and optional provider settings. It is safe to share. |
-| `bizmatic_django/.env` | Your local runtime configuration and secrets. It is ignored by Git and must not be committed. |
+| [`auditcounter_django/.env.example`](auditcounter_django/.env.example) | Tracked template with placeholders, defaults, and optional provider settings. It is safe to share. |
+| `auditcounter_django/.env` | Your local runtime configuration and secrets. It is ignored by Git and must not be committed. |
 | `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_TIME_ZONE` | Django runtime settings. Use a unique secret and disable debug mode outside local development. |
 | `DB_ENGINE`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | The **application** database. The example defaults to SQLite; PostgreSQL values are documented in the template. |
 | `LOCAL_FILE_STORAGE_PATH` | Directory for uploaded files. Store it outside the repository or ensure it is ignored. |
 | `DOC_EXTRACTION_*`, `ROUTER_*`, `ACCOUNTS_PAYABLE_*`, `ACCOUNTS_RECEIVABLE_*`, `CONFIG_ASSISTANT_*` | Provider, model, endpoint, timeout, and request limits for each workflow. Blank module-specific keys and endpoints can fall back to document-extraction settings. |
 | `RECONCILIATION_PRICE_TOLERANCE` | Allowed monetary difference per matched line; defaults to `0.01`. |
 
-Source PostgreSQL credentials are entered in **Database connections**, separately from the application database settings. Saved passwords are encrypted with a key stored by default at `~/.config/bizmatic/db-extraction.key`. Keep that key outside Git, make it available to all application workers, and back it up separately from the application database. See the [database extraction guide](bizmatic_django/db_extraction/README.md) for permissions, encryption, and schema discovery.
+Source PostgreSQL credentials are entered in **Database connections**, separately from the application database settings. Saved passwords are encrypted with a key stored by default at `~/.config/bizmatic/db-extraction.key`. Keep that key outside Git, make it available to all application workers, and back it up separately from the application database. See the [database extraction guide](auditcounter_django/db_extraction/README.md) for permissions, encryption, and schema discovery.
 
 ## PDF previews behind Nginx
 
@@ -149,10 +149,10 @@ Source previews use read-only transactions. The source database needs the approp
 ## Project layout
 
 ```text
-bizmatic_django/
+auditcounter_django/
   manage.py                    Django management entry point
   .env.example                 Shareable environment template
-  bizmatic_django/             Settings, environment loader, ASGI and WSGI
+  auditcounter_django/             Settings, environment loader, ASGI and WSGI
   document_extraction/         Documents, storage, extraction, and review
   db_extraction/               PostgreSQL connections and schema snapshots
   router/                      Document routing and handoff
@@ -165,12 +165,12 @@ CONTRIBUTING.md                Development and contribution guidance
 ## Development and documentation
 
 ```sh
-python bizmatic_django/manage.py check
-python bizmatic_django/manage.py makemigrations --check --dry-run
-python bizmatic_django/manage.py test document_extraction
+python auditcounter_django/manage.py check
+python auditcounter_django/manage.py makemigrations --check --dry-run
+python auditcounter_django/manage.py test document_extraction
 ```
 
-Tests use a separate Django test database. Consult [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. More detail is available in the [document workspace guide](bizmatic_django/document_extraction/FRONTEND.md), [database extraction guide](bizmatic_django/db_extraction/README.md), [AP/AR guide](bizmatic_django/accounts_receivable/README.md), [query builder guide](bizmatic_django/accounts_receivable/QUERY_BUILDER.md), and [migration guide](bizmatic_django/accounts_receivable/DATABASE_MIGRATION.md).
+Tests use a separate Django test database. Consult [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. More detail is available in the [document workspace guide](auditcounter_django/document_extraction/FRONTEND.md), [database extraction guide](auditcounter_django/db_extraction/README.md), [AP/AR guide](auditcounter_django/accounts_receivable/README.md), [query builder guide](auditcounter_django/accounts_receivable/QUERY_BUILDER.md), and [migration guide](auditcounter_django/accounts_receivable/DATABASE_MIGRATION.md).
 
 Text extraction supports text-based PDFs, DOCX, Excel, TXT, and CSV. Scanned PDFs require an OCR workflow; legacy `.doc` files must be converted to `.docx`. Provider and model capabilities vary, and provider calls may incur charges. Static vendor assets and fonts include their own notices in the repository.
 
@@ -180,7 +180,7 @@ The post-routing Encoder workspace at `/encoder/` prepares dynamic MCP tool payl
 from existing extraction snapshots, with reusable mappings, contextual AI correction,
 schema validation, explicit execution confirmation and durable history. It reuses
 Router handoffs and the shared Falcon UI. It is disabled by default and restricted
-to trusted loopback development. See [Encoder setup and usage](bizmatic_django/encoder/README.md)
+to trusted loopback development. See [Encoder setup and usage](auditcounter_django/encoder/README.md)
 for frontend connection setup, ERP credentials, permitted operations and safe retry behavior.
 
 ### Select setup modules

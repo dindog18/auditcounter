@@ -33,8 +33,8 @@ jobs:
       - name: Check dependency compatibility
         run: python -m pip check
       - name: Check Django configuration
-        run: python bizmatic_django/manage.py check
+        run: python auditcounter_django/manage.py check
       - name: Check for missing migrations
-        run: python bizmatic_django/manage.py makemigrations --check --dry-run
+        run: python auditcounter_django/manage.py makemigrations --check --dry-run
       - name: Run tests
-        run: python bizmatic_django/manage.py test document_extraction db_extraction router encoder accounts_receivable accounts_payable --noinput
+        run: python auditcounter_django/manage.py test document_extraction db_extraction router encoder accounts_receivable accounts_payable --noinput

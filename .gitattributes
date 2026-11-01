@@ -25,4 +25,4 @@
 *.woff2 binary
 
 # Keep bundled third-party assets out of language statistics.
-bizmatic_django/document_extraction/static/document_extraction/falcon/** linguist-vendored
+auditcounter_django/document_extraction/static/document_extraction/falcon/** linguist-vendored

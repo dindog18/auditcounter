@@ -10,7 +10,7 @@ the application. Use a local development database and synthetic documents.
 - Preserve explanatory comments and update them when behavior changes.
 - Keep existing imports through `util.py` working when moving public functions.
 - Keep database migrations with model changes. Generate and inspect migrations
-  with `python bizmatic_django/manage.py makemigrations`.
+  with `python auditcounter_django/manage.py makemigrations`.
 - Application views currently accept GET/HEAD only. Changes that introduce
   writes, uploads, or provider calls should describe the new behavior explicitly.
 - Update the README and `.env.example` when configuration or setup changes.
@@ -19,9 +19,9 @@ the application. Use a local development database and synthetic documents.
 ## Before opening a pull request
 
 ```sh
-python bizmatic_django/manage.py check
-python bizmatic_django/manage.py makemigrations --check --dry-run
-python bizmatic_django/manage.py test document_extraction
+python auditcounter_django/manage.py check
+python auditcounter_django/manage.py makemigrations --check --dry-run
+python auditcounter_django/manage.py test document_extraction
 git diff --check
 git status --short
 ```
