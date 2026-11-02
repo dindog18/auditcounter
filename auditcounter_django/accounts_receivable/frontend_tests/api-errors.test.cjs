@@ -32,3 +32,8 @@ test('successful JSON responses pass through unchanged',async()=>{
   const {api}=client({status:200,ok:true,json:async()=>result});
   assert.equal(await api.post('setup-generate',null,{}),result);
 });
+test('duplicate conflicts preserve the existing case identity and restore controls',async()=>{
+  const {api,controls}=client({status:409,ok:false,json:async()=>({message:'An identical reconciliation case already exists.',existing_case_id:42,existing_case_reference:'AP-42'})});
+  await assert.rejects(api.post('reconciliation',null,{}),error=>error.existingCase.id===42&&error.existingCase.reference==='AP-42');
+  assert.equal(controls[0].disabled,false);
+});

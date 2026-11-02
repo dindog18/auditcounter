@@ -337,6 +337,13 @@
   function documentsForParty(partyId, selected = {}, currency='PHP') {
     return [['purchase-orders','orderIds','Purchase orders'],['delivery-receipts','receiptIds','Delivery receipts'],['invoices','invoiceIds','Invoices']].map(([kind,key,title])=>field(key,title,selected[key] || [],'text', {full:true,multiple:true,choices:data[kind].filter(row=>row.partyId===Number(partyId) && (!row.currency || row.currency===currency)).map(row=>[row.id,row.reference]),hint:'Select one or more documents. Use Ctrl / Command to select multiple.'})).join('');
   }
+  function caseOverlapWarnings(rows,selected,currentId) {
+    return rows.filter(row=>row.id!==currentId&&row.partyId===selected.partyId&&row.currency===selected.currency).map(row=>{
+      const shared=['orderIds','receiptIds','invoiceIds'].map(key=>({key,ids:row[key].filter(id=>selected[key].includes(id))})).filter(group=>group.ids.length);
+      return {row,shared,exact:['orderIds','receiptIds','invoiceIds'].every(key=>new Set(row[key]).size===new Set(selected[key]).size&&row[key].every(id=>selected[key].includes(id)))};
+    }).filter(item=>item.shared.length);
+  }
+
   function form(record) {
     // Only account maintenance and reconciliation grouping are editable here.
     if (!config.canEncode || extractionOnly) {
@@ -366,11 +373,22 @@
     }
     root.innerHTML = breadcrumb(editing ? `Edit ${draft.reference}` : `New ${singulars[resource]}`) +
       heading(`${editing ? 'Edit' : 'New'} ${singulars[resource]}`, "Fields marked * are required. Changes are validated and saved to the database.") +
-      `<form id="record-form"><div id="form-error" class="finance-form-error" role="alert" tabindex="-1" hidden></div>${card(resource === 'parties' ? 'Account information' : 'Case details', `<div class="finance-card-body"><div class="finance-form-grid">${fields}</div></div>`)}${linkedDocuments}${card(resource === 'parties' ? 'Extraction context' : 'Case notes', `<div class="finance-card-body">${field('notes', resource === 'parties' ? 'Account context' : 'Notes', draft.notes, 'textarea')}</div>`)}<div class="finance-form-footer"><span class="text-600 fs-10">${icon('flask')} Changes are saved to the database</span><div class="finance-actions">${button(editing ? url(resource,record.id) : url(resource), 'Cancel')}<button class="btn btn-primary" type="submit">${icon('check')} ${editing ? 'Save changes' : 'Create '+singulars[resource]}</button></div></div></form>`;
+      `<form id="record-form"><div id="form-error" class="finance-form-error" role="alert" tabindex="-1" hidden></div>${card(resource === 'parties' ? 'Account information' : 'Case details', `<div class="finance-card-body"><div class="finance-form-grid">${fields}</div></div>`)}${linkedDocuments}${resource==='reconciliation'?'<div id="case-overlap-warning" class="finance-callout" role="status" hidden></div>':''}${card(resource === 'parties' ? 'Extraction context' : 'Case notes', `<div class="finance-card-body">${field('notes', resource === 'parties' ? 'Account context' : 'Notes', draft.notes, 'textarea')}</div>`)}<div class="finance-form-footer"><span class="text-600 fs-10">${icon('flask')} Changes are saved to the database</span><div class="finance-actions">${button(editing ? url(resource,record.id) : url(resource), 'Cancel')}<button class="btn btn-primary" type="submit">${icon('check')} ${editing ? 'Save changes' : 'Create '+singulars[resource]}</button></div></div></form>`;
     if (resource === 'reconciliation') root.querySelector('[name="partyId"]').addEventListener('change', event => {
       root.querySelector('#case-document-fields').innerHTML = documentsForParty(event.target.value,{},root.querySelector('[name=currency]').value);
     });
     if(resource==='reconciliation')root.querySelector('[name=currency]').addEventListener('change',event=>{root.querySelector('#case-document-fields').innerHTML=documentsForParty(root.querySelector('[name=partyId]').value,{},event.target.value);});
+    if(resource==='reconciliation') {
+      const warn=()=>{
+        const values=new FormData(root.querySelector('#record-form'));
+        const selected={partyId:Number(values.get('partyId')),currency:values.get('currency')};
+        for(const key of ['orderIds','receiptIds','invoiceIds'])selected[key]=values.getAll(key).map(Number);
+        const warnings=caseOverlapWarnings(data.reconciliation,selected,record?.id);
+        const box=root.querySelector('#case-overlap-warning');box.hidden=!warnings.length;
+        box.innerHTML=warnings.map(({row,shared,exact})=>`<p>${a(url('reconciliation',row.id),esc(row.reference))}: ${exact?'Identical document grouping. Saving will be checked by the server.':'Shared documents may be legitimate; existing allocation limits still apply.'} ${shared.map(group=>esc(({orderIds:'PO',receiptIds:'DR',invoiceIds:'Invoice'})[group.key])+': '+group.ids.map(id=>esc(find(({orderIds:'purchase-orders',receiptIds:'delivery-receipts',invoiceIds:'invoices'})[group.key],id)?.reference || id)).join(', ')).join(' · ')}</p>`).join('');
+      };
+      root.querySelector('#record-form').addEventListener('change',warn);warn();
+    }
     root.querySelector('#record-form').addEventListener('submit', async event => {
       event.preventDefault();
       const values = new FormData(event.currentTarget);
@@ -392,7 +410,12 @@
       try {
         const result = await api.post(resource, record?.id, {...next, revision:record?.revision});
         location.href = url(resource, result.id);
-      } catch (error) { showError(error.message); }
+      } catch (error) {
+        showError(error.message);
+        if(resource==='reconciliation'&&Number.isInteger(error.existingCase?.id)) {
+          root.querySelector('#form-error').insertAdjacentHTML('beforeend',`<div>${a(url('reconciliation',error.existingCase.id),'Open '+esc(error.existingCase.reference),'primary-link')}</div>`);
+        }
+      }
 
     });
   }

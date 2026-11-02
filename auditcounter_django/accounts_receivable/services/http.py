@@ -125,6 +125,8 @@ def perform(request, mode, action, record_id=None):
     except (ValidationError, ValueError, TypeError, KeyError, OverflowError) as error:
         message = "; ".join(error.messages) if isinstance(error, ValidationError) else "Invalid request. Check the submitted fields and reload if necessary."
         result = {"message": message}
+        if getattr(error,"existing_case",None):
+            result.update(error.existing_case)
         if getattr(error, "llm_log_no", None):
             result["llm_log_no"] = error.llm_log_no
         return JsonResponse(result, status=409 if getattr(error, "code", None) == "conflict" else 400)

@@ -33,6 +33,7 @@ window.BizmaticAccounting = (() => {
       if (!response.ok) {
         const error = new Error(result.message || 'The action could not be saved.');
         error.llmLogNo = result.llm_log_no;
+        error.existingCase = result.existing_case_id ? {id:result.existing_case_id, reference:result.existing_case_reference} : null;
         throw error;
       }
       return result;

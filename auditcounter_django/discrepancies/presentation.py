@@ -73,3 +73,14 @@ def serialize_investigation(case):
         availableStatuses=[investigation.workflow_status]+sorted(TRANSITIONS[investigation.workflow_status]-CLOSED-{'needs_review'}),
         closureStatuses=sorted(TRANSITIONS[investigation.workflow_status]&CLOSED) if not closed else [],
         resolutionTypes=[{'value':value,'label':label} for value,label in CaseInvestigation.Resolution.choices],history=history),token
+
+
+def serialize_case_summary(row):
+    """Serialize annotated persisted state; never evaluate accounting documents."""
+    data=dict(row)
+    module=data['module']
+    data['case_key']=f"{module}:{data['case_id']}"
+    data['highest_severity']={0:None,1:'information',2:'warning',3:'critical'}[data.pop('severity_rank')]
+    data['discrepancy_amount']=str(data['discrepancy_amount']) if data['discrepancy_amount'] is not None else None
+    data['detail_url']=reverse(f"{'ACCOUNTS_PAYABLE' if module=='ap' else 'ACCOUNTS_RECEIVABLE'}:reconciliation_detail",args=[data['case_id']])
+    return data

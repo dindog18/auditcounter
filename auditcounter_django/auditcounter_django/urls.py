@@ -20,6 +20,7 @@ from django.contrib import admin
 from django.urls import path, include
 
 urlpatterns = [
+    path("discrepancies/", include("discrepancies.urls")),
     path("configuration-lab/", include("accounts_receivable.prototype_urls")),
     path("setup/", setup, name="setup"),
     path("setup/modules/", save_modules, name="setup_modules"),

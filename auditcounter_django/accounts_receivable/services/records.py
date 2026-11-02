@@ -99,6 +99,11 @@ def save_case(mode, data, record_id=None):
         selected[relation] = rows
     if not selected["sales_invoices"]:
         raise ValidationError("Link at least one invoice.")
+    from .case_duplicates import find_exact_duplicate_case, DuplicateCaseError
+    duplicate=find_exact_duplicate_case(mode,account.pk,data.get('currency'),
+        {key:[row.pk for row in rows] for key,rows in selected.items()},exclude_case_id=case.pk)
+    if duplicate:
+        raise DuplicateCaseError(mode,duplicate)
     if case.pk:
         # Membership edits invalidate saved comparisons; they must be reviewed again.
         changed = any(set(getattr(case, key).values_list("pk", flat=True)) != {row.pk for row in rows} for key, rows in selected.items())
