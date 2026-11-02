@@ -119,3 +119,31 @@ class ThreeWayMatchTests(TestCase):
         self.case.sales_invoices.remove(self.invoice)
         self.case.refresh_from_db()
         self.assertEqual(self.case.reconciliation_status, "exception")
+
+
+from accounts_receivable.matching_test_support import PartialDeliveryScenarios
+
+
+class PayablesPartialDeliveryTests(PartialDeliveryScenarios, TestCase):
+    mode = 'ap'
+
+
+from accounts_receivable.auto_matching_test_support import AutoMatchingScenarios
+
+
+class PayablesAutoMatchingTests(AutoMatchingScenarios, TestCase):
+    mode = 'ap'
+
+
+from discrepancies.test_support import FindingScenarios
+
+
+class PayablesFindingTests(FindingScenarios, TestCase):
+    mode = 'ap'
+
+
+from discrepancies.investigation_test_support import InvestigationScenarios
+
+
+class PayablesInvestigationTests(InvestigationScenarios, TestCase):
+    mode = 'ap'

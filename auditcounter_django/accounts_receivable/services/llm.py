@@ -38,29 +38,7 @@ def run(mode, configuration, purpose, system, context, route=None, response_sche
         timeout = int(get_env(f"{prefix}_LLM_TIMEOUT_SECONDS", "120"))
         if tokens <= 0 or timeout <= 0:
             raise ValueError("Accounting token and timeout limits must be positive.")
-        # JSON mode alone does not tell compatible providers our mapping format.
-        # Include the same contract Ollama receives, including on repair requests.
-        if response_schema and provider != "ollama":
-            system += "\nReturn a JSON object matching this response schema:\n" + json.dumps(response_schema, separators=(",", ":"))
-        body: dict[str, Any] = {"model": name, "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}], "max_tokens": tokens}
-        if provider == "anthropic":
-            body["system"] = system
-            body["messages"] = [{"role": "user", "content": content}]
-        elif provider == "google":
-            body = {"model": name, "systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": content}]}], "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": tokens}}
-        elif provider == "ollama":
-            body.pop("max_tokens")
-            body.update(format=response_schema or "json", options={"num_predict": tokens, **({"temperature": 0} if response_schema else {})}, stream=False)
-        else:
-            body["response_format"] = {"type": "json_object"}
-        # Alibaba's hybrid DeepSeek V4 models default to thinking. Reasoning
-        # consumes the same output budget and can leave no JSON to validate.
-        # This is a raw HTTP body (not the OpenAI SDK's extra_body wrapper).
-        if provider == "alibaba" and name.lower().startswith("deepseek-v4"):
-            thinking = get_env(f"{prefix}_ALIBABA_ENABLE_THINKING", "false").strip().lower()
-            if thinking not in {"true", "false"}:
-                raise ValueError(f"{prefix}_ALIBABA_ENABLE_THINKING must be true or false.")
-            body["enable_thinking"] = thinking == "true"
+        body = build_json_payload(provider, name, system, context, tokens, response_schema, config_prefix=prefix)
         log.request_payload = body
         log.save(update_fields=["request_payload", "updated_at"])
         if provider not in {"openai", "anthropic", "google", "ollama", "alibaba", "deepseek"} or not name:
@@ -70,19 +48,7 @@ def run(mode, configuration, purpose, system, context, route=None, response_sche
         if not isinstance(result, dict):
             raise ValueError("The accounting provider response must be a JSON object.")
         log.markdown_text = response_text(provider, result)
-        if (result.get("stop_reason") == "max_tokens" or result.get("done_reason") == "length"
-                or any(row.get("finish_reason") == "length" for row in result.get("choices", []))
-                or any(row.get("finishReason") == "MAX_TOKENS" for row in result.get("candidates", []))):
-            raise ValueError(
-                f"The accounting response reached its {tokens:,}-token output limit before completing JSON. "
-                f"Increase {prefix}_MAX_OUTPUT_TOKENS, restart the application, and retry. "
-                "Reasoning tokens also consume the output budget on thinking models."
-            )
-        raw = log.markdown_text.strip()
-        fenced = re.fullmatch(r"```(?:json)?\s*([\s\S]*?)\s*```", raw)
-        parsed = json.loads(fenced.group(1) if fenced else raw)
-        if not isinstance(parsed, dict):
-            raise ValueError("The LLM response must be a JSON object.")
+        parsed = parse_json_response(provider, result, tokens, config_prefix=prefix)
         # The caller completes the attempt only after validating and saving its output.
         log.status = "processing"
     except Exception as error:
@@ -95,3 +61,54 @@ def run(mode, configuration, purpose, system, context, route=None, response_sche
         log.processing_time_ms = round((perf_counter() - started) * 1000)
         log.save()
     return log, parsed
+
+
+def build_json_payload(provider, name, system, context, tokens, response_schema=None, *, config_prefix):
+    """Shared provider-native JSON request construction; no extraction configuration needed."""
+    prefix = config_prefix
+    content = json.dumps(context, ensure_ascii=False)
+    # JSON mode alone does not tell compatible providers our mapping format.
+    # Include the same contract Ollama receives, including on repair requests.
+    if response_schema and provider != "ollama":
+        system += "\nReturn a JSON object matching this response schema:\n" + json.dumps(response_schema, separators=(",", ":"))
+    body: dict[str, Any] = {"model": name, "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}], "max_tokens": tokens}
+    if provider == "anthropic":
+        body["system"] = system
+        body["messages"] = [{"role": "user", "content": content}]
+    elif provider == "google":
+        body = {"model": name, "systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": content}]}], "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": tokens}}
+    elif provider == "ollama":
+        body.pop("max_tokens")
+        body.update(format=response_schema or "json", options={"num_predict": tokens, **({"temperature": 0} if response_schema else {})}, stream=False)
+    else:
+        body["response_format"] = {"type": "json_object"}
+    # Alibaba's hybrid DeepSeek V4 models default to thinking. Reasoning
+    # consumes the same output budget and can leave no JSON to validate.
+    # This is a raw HTTP body (not the OpenAI SDK's extra_body wrapper).
+    if provider == "alibaba" and name.lower().startswith("deepseek-v4"):
+        thinking = get_env(f"{prefix}_ALIBABA_ENABLE_THINKING", "false").strip().lower()
+        if thinking not in {"true", "false"}:
+            raise ValueError(f"{prefix}_ALIBABA_ENABLE_THINKING must be true or false.")
+        body["enable_thinking"] = thinking == "true"
+    return body
+
+
+def parse_json_response(provider, result, tokens, *, config_prefix="ACCOUNTING"):
+    """Parse the same structured response and truncation checks used by extraction."""
+    prefix = config_prefix
+    if not isinstance(result, dict):
+        raise ValueError("The provider response must be a JSON object.")
+    if (result.get("stop_reason") == "max_tokens" or result.get("done_reason") == "length"
+            or any(row.get("finish_reason") == "length" for row in result.get("choices", []))
+            or any(row.get("finishReason") == "MAX_TOKENS" for row in result.get("candidates", []))):
+        raise ValueError(
+            f"The accounting response reached its {tokens:,}-token output limit before completing JSON. "
+            f"Increase {prefix}_MAX_OUTPUT_TOKENS, restart the application, and retry. "
+            "Reasoning tokens also consume the output budget on thinking models."
+        )
+    raw = response_text(provider, result).strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*([\s\S]*?)\s*```", raw)
+    parsed = json.loads(fenced.group(1) if fenced else raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("The LLM response must be a JSON object.")
+    return parsed

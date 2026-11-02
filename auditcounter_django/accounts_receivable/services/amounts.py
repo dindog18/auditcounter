@@ -6,14 +6,20 @@ CENT = Decimal("0.01")
 ZERO = Decimal("0")
 
 
-def line_amount_difference(line, quantity_field):
+def expected_line_total(line, quantity_field):
     # Line discounts and tax are amounts, not rates. Header charges are checked separately.
     # Two 18-digit quantity/price fields can exceed the default Decimal precision.
     with localcontext() as amount_context:
         amount_context.prec = 40
         expected = (getattr(line, quantity_field) * line.unit_price
                     - line.discount_amount + line.tax_amount).quantize(CENT, rounding=ROUND_HALF_UP)
-        return abs(line.line_total - expected)
+        return expected
+
+
+def line_amount_difference(line, quantity_field):
+    with localcontext() as amount_context:
+        amount_context.prec = 40
+        return abs(line.line_total - expected_line_total(line, quantity_field))
 
 
 def line_amount_issues(line, quantity_field, tolerance=CENT):

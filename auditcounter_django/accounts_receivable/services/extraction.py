@@ -3,6 +3,7 @@
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
+from discrepancies.services import defer_reconciliation
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -152,6 +153,7 @@ def validate_totals(target, record, lines, *, header_values=None, line_values=No
 
 
 @transaction.atomic
+@defer_reconciliation()
 def save_result(mode, config, parsed, log=None, route=None, database_source=None, source_table=None, source_key=None, *, automatic=False):
     if set(parsed) - {"record", "lines", "issues"} or not isinstance(parsed.get("issues", []), list):
         raise ValidationError("Expected record, lines, and issues in the extraction output.")

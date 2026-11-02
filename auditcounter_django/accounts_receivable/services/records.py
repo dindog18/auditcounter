@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+from discrepancies.services import defer_reconciliation
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
@@ -79,6 +80,7 @@ def save_party(mode, data, record_id=None):
 
 
 @transaction.atomic
+@defer_reconciliation()
 def save_case(mode, data, record_id=None):
     account = get_object_or_404(model(mode, party_key(mode)).objects.select_for_update(), pk=data.get("partyId"))
     case = get_object_or_404(model(mode, "Transaction").objects.select_for_update(), pk=record_id) if record_id else model(mode, "Transaction")()
@@ -149,34 +151,130 @@ def save_allocations(mode, record_id, data):
 
 
 @transaction.atomic
+@defer_reconciliation()
 def save_matches(mode, record_id, data):
     case = get_object_or_404(model(mode, "Transaction"), pk=record_id)
     model(mode, party_key(mode)).objects.select_for_update().get(pk=getattr(case, party_key(mode)+"_id"))
     case = model(mode, "Transaction").objects.select_for_update().get(pk=record_id)
     check_revision(case, data.get("revision"), [case_membership(case), matches(case)])
+    if data.get('preserveExisting') or data.get('suggestionRevision'):
+        from .auto_matching import source_revision
+        if not data.get('preserveExisting') or not data.get('suggestionRevision'):
+            raise ValidationError("Auto Match confirmation requires its source revision and merge mode.")
+        if source_revision(case, lock=True) != data['suggestionRevision']:
+            raise ValidationError("Source evidence or allocations changed. Run Auto Match again.", code='conflict')
     rows = data.get("matches")
     if not isinstance(rows, list) or len(rows) > 1000:
         raise ValidationError("Provide up to 1,000 line matches.")
     if any(not isinstance(row, dict) for row in rows):
         raise ValidationError("Each line match must be an object containing its field values.")
-    case.line_matches.all().delete()
-    seen = set()
-    for row in rows:
-        invoice_id = row.get("invoiceLineId")
-        if type(invoice_id) is not int or invoice_id in seen:
-            raise ValidationError("Choose each invoice line once.")
-        seen.add(invoice_id)
-        match = model(mode, "DocumentMatch")(
-            transaction=case, invoice_line_id=invoice_id,
-            purchase_order_line_id=row.get("orderLineId"), delivery_receipt_line_id=row.get("receiptLineId"),
-            matched_quantity=row.get("quantity", "0"), match_status="pending")
-        match.full_clean()
-        if match.purchase_order_line_id and match.delivery_receipt_line_id and Decimal(str(match.matched_quantity)) > 0:
-            match.match_status = "matched"
-            try:
-                match.full_clean()
-            except ValidationError:
-                match.match_status = "exception"
-        match.save()
+    if data.get('preserveExisting'):
+        rows = merge_match_rows(case, rows)
+    prepared = prepare_matches(mode, case, rows, lock=True)
+    if data.get('preserveExisting'):
+        saved_keys = set(case.line_matches.values_list('invoice_line_id', 'purchase_order_line_id', 'delivery_receipt_line_id'))
+        for match in prepared:
+            identity = (match.invoice_line_id, match.purchase_order_line_id, match.delivery_receipt_line_id)
+            if identity not in saved_keys:
+                match.save()
+    else:
+        case.line_matches.all().delete()
+        for match in prepared:
+            match.save()
     case.refresh_reconciliation_status()
     return case
+
+
+def prepare_matches(mode, case, rows, *, lock=False):
+    """Validate the whole replacement before deleting anything; shared with read-only preview."""
+    from importlib import import_module
+    from django.db.models import Sum
+    validate = import_module(model(mode, "Transaction").__module__.rsplit('.', 1)[0] + '.services.reconciliation').validate_match
+    Match = model(mode, "DocumentMatch")
+    if not isinstance(rows, list) or len(rows) > 1000 or any(not isinstance(row, dict) for row in rows):
+        raise ValidationError("Provide up to 1,000 allocation objects.")
+    fields = (("invoiceLineId", "invoice_line", "quantity_invoiced"),
+              ("orderLineId", "purchase_order_line", "quantity_ordered"),
+              ("receiptLineId", "delivery_receipt_line", "quantity_accepted"))
+    sources = {}
+    for key, field, capacity in fields:
+        ids = {row.get(key) for row in rows if type(row.get(key)) is int}
+        if any(row.get(key) is not None and type(row.get(key)) is not int for row in rows):
+            raise ValidationError("Choose valid source line IDs.")
+        query = Match._meta.get_field(field).related_model.objects.filter(pk__in=ids).order_by('pk')
+        if lock:
+            query = query.select_for_update()
+        sources[field] = {line.pk: line for line in query}
+        if len(sources[field]) != len(ids):
+            raise ValidationError("A selected source line no longer exists.")
+    seen, prepared, totals = set(), [], {}
+    for row in rows:
+        identity = tuple(row.get(key) for key, _, _ in fields)
+        if identity[0] is None or identity in seen:
+            raise ValidationError("Choose an invoice line and avoid duplicate invoice/order/receipt allocations.")
+        seen.add(identity)
+        match = Match(transaction=case, matched_quantity=row.get('quantity', '0'))
+        for key, field, capacity in fields:
+            setattr(match, field, sources[field].get(row.get(key)))
+        match.clean_fields()
+        if match.matched_quantity > 0:
+            if not match.purchase_order_line_id or not match.delivery_receipt_line_id:
+                raise ValidationError("Positive allocations require an order and accepted receipt line.")
+            match.match_status = 'matched'
+        validate(match, check_amounts=False, check_capacity=False)
+        for key, field, capacity in fields:
+            line = getattr(match, field)
+            if line is None:
+                continue
+            total_key = (field, line.pk)
+            totals[total_key] = totals.get(total_key, Decimal('0')) + match.matched_quantity
+            external = Match.objects.filter(**{field: line}, purchase_order_line__isnull=False,
+                                            delivery_receipt_line__isnull=False).exclude(transaction=case)
+            used = external.aggregate(total=Sum('matched_quantity'))['total'] or Decimal('0')
+            if used + totals[total_key] > getattr(line, capacity):
+                raise ValidationError("Matched quantity exceeds the available quantity, including other cases.")
+            if external.filter(invoice_line_id=identity[0], purchase_order_line_id=identity[1], delivery_receipt_line_id=identity[2]).exists():
+                raise ValidationError("Duplicate invoice/order/receipt allocation in another case.")
+        try:
+            validate(match, check_capacity=False)
+        except ValidationError:
+            # Only arithmetic remains: retain evidence and visibly flag its source data.
+            match.match_status = 'exception'
+        prepared.append(match)
+    return prepared
+
+
+def preview_matches(mode, record_id, data):
+    from importlib import import_module
+    case = get_object_or_404(model(mode, "Transaction"), pk=record_id)
+    check_revision(case, data.get('revision'), [case_membership(case), matches(case)])
+    prepared = prepare_matches(mode, case, data.get('matches'))
+    service = import_module(model(mode, "Transaction").__module__.rsplit('.', 1)[0] + '.services.reconciliation')
+    return service.evaluate_reconciliation(case, prepared)
+
+
+def merge_match_rows(case, rows):
+    """Auto confirmation adds to saved manual matches; it cannot silently replace them."""
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise ValidationError("Provide allocation objects.")
+    existing = {(row['invoice_line_id'], row['purchase_order_line_id'], row['delivery_receipt_line_id']):
+                dict(invoiceLineId=row['invoice_line_id'], orderLineId=row['purchase_order_line_id'],
+                     receiptLineId=row['delivery_receipt_line_id'], quantity=str(row['matched_quantity']))
+                for row in matches(case)}
+    seen, additions = set(), []
+    for row in rows:
+        identity = tuple(row.get(key) for key in ('invoiceLineId', 'orderLineId', 'receiptLineId'))
+        if any(value is not None and type(value) is not int for value in identity):
+            raise ValidationError("Choose valid source line IDs.")
+        if identity in seen:
+            raise ValidationError("Duplicate invoice/order/receipt allocation.")
+        seen.add(identity)
+        if identity in existing:
+            # Validate decimals through the existing model field before comparing.
+            field = case.line_matches.model._meta.get_field('matched_quantity')
+            quantity = field.clean(row.get('quantity', '0'), None)
+            if quantity != Decimal(existing[identity]['quantity']):
+                raise ValidationError("Save edits to existing allocations separately before using Auto Match.")
+        else:
+            additions.append(row)
+    return list(existing.values()) + additions

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal, localcontext
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
 
-from .amounts import line_amount_difference, line_amount_issues
+from .amounts import line_amount_issues
 
 if TYPE_CHECKING:
     from ..models import (
@@ -106,7 +106,7 @@ def validate_line(line: DocumentLine) -> None:
         raise ValidationError("Remove existing matches before changing matched line values.")
 
 
-def validate_match(match: DocumentMatch) -> None:
+def validate_match(match: DocumentMatch, *, check_amounts=True, check_capacity=True) -> None:
     """Check three-way matching rules and prevent reuse of ordered or accepted quantities."""
     errors = {}
     if not match.transaction_id or not match.invoice_line_id:
@@ -154,7 +154,7 @@ def validate_match(match: DocumentMatch) -> None:
             (order_line, "quantity_ordered", "purchase_order_line"),
         ):
             issues = line_amount_issues(line, quantity_field, PRICE_TOLERANCE)
-            if issues:
+            if issues and check_amounts:
                 errors[field] = "; ".join(issues)
         if not invoice.invoice_reference_no or not invoice.invoice_date or (not invoice.currency):
             errors["invoice_line"] = (
@@ -169,39 +169,17 @@ def validate_match(match: DocumentMatch) -> None:
             )
         if order_line.purchase_order.status == "cancelled":
             errors["purchase_order_line"] = "A cancelled purchase order cannot be matched."
-        if (
-            abs(order_line.unit_price - invoice_line.unit_price) * match.matched_quantity
-            > PRICE_TOLERANCE
-        ):
-            errors["invoice_line"] = "Invoiced unit price differs from the purchase order."
-        if order_line.quantity_ordered and invoice_line.quantity_invoiced:
-            order_discount = order_line.discount_amount / order_line.quantity_ordered
-            invoice_discount = invoice_line.discount_amount / invoice_line.quantity_invoiced
-            order_tax = order_line.tax_amount / order_line.quantity_ordered
-            invoice_tax = invoice_line.tax_amount / invoice_line.quantity_invoiced
-            if abs(order_discount - invoice_discount) * match.matched_quantity > PRICE_TOLERANCE:
-                errors["invoice_line"] = "Invoiced discount differs from the purchase order."
-            if abs(order_tax - invoice_tax) * match.matched_quantity > PRICE_TOLERANCE:
-                errors["invoice_line"] = "Invoiced tax differs from the purchase order."
-        if (
-            order_line.unit_of_measure
-            and invoice_line.unit_of_measure
-            and (order_line.unit_of_measure.casefold() != invoice_line.unit_of_measure.casefold())
-        ):
-            errors["invoice_line"] = "Unit of measure differs from the order."
-        if (
-            order_line.item_code
-            and invoice_line.item_code
-            and (order_line.item_code.casefold() != invoice_line.item_code.casefold())
-        ):
-            errors["invoice_line"] = "Item code differs from the order."
-        if (
-            receipt_line.item_code
-            and invoice_line.item_code
-            and (receipt_line.item_code.casefold() != invoice_line.item_code.casefold())
-        ):
-            errors["delivery_receipt_line"] = "Received item differs from the invoice."
-    if match.match_status == match.Status.MATCHED and match.matched_quantity > ZERO:
+        from sku_matching.services.normalization import normalize_sku, normalize_unit
+        from sku_matching.services.mapping import identity_for_match
+        units = [normalize_unit(line.unit_of_measure) for line in (invoice_line, order_line, receipt_line)]
+        if len(set(units)) > 1:
+            errors["delivery_receipt_line"] = "Unit of measure differs; SKU mappings cannot convert units."
+        codes = [normalize_sku(line.item_code) for line in (invoice_line, order_line, receipt_line)]
+        if any(codes):
+            identity = identity_for_match(match)
+            if not identity['equivalent']:
+                errors["invoice_line"] = "; ".join(identity['reasons'])
+    if check_capacity and match.matched_quantity > ZERO and match.purchase_order_line_id and match.delivery_receipt_line_id:
         for field, capacity in (
             ("invoice_line", "quantity_invoiced"),
             ("purchase_order_line", "quantity_ordered"),
@@ -212,13 +190,19 @@ def validate_match(match: DocumentMatch) -> None:
                 continue
             used = (
                 type(match)
-                .objects.filter(**{field: line}, match_status=match.Status.MATCHED)
+                .objects.filter(**{field: line}, purchase_order_line__isnull=False, delivery_receipt_line__isnull=False)
                 .exclude(pk=match.pk)
                 .aggregate(total=Sum("matched_quantity"))["total"]
                 or ZERO
             )
             if used + match.matched_quantity > getattr(line, capacity):
                 errors[field] = "Matched quantity exceeds the available quantity."
+    if check_capacity and type(match).objects.filter(
+        invoice_line_id=match.invoice_line_id,
+        purchase_order_line_id=match.purchase_order_line_id,
+        delivery_receipt_line_id=match.delivery_receipt_line_id,
+    ).exclude(pk=match.pk).exists():
+        errors["invoice_line"] = "Duplicate invoice/order/receipt allocation."
     if errors:
         raise ValidationError(errors)
 
@@ -324,88 +308,16 @@ def unallocated_cash(payment: CustomerPayment) -> Decimal:
     return max(ZERO, payment.amount_received - allocated)
 
 
+def evaluate_reconciliation(case, allocations=None):
+    """Read-only status, amounts and evidence-backed discrepancy findings."""
+    from accounts_receivable.services.evaluation import evaluate
+    return evaluate(case, validate_match, PRICE_TOLERANCE, allocations)
+
+
 def calculate_reconciliation(case: Transaction) -> tuple[str, Decimal]:
-    """Compare document totals and invoice line coverage to classify the case."""
-    if not case.pk:
-        return ("pending", ZERO)
-    invoices = list(case.sales_invoices.all())
-    invoice_lines = [line for invoice in invoices for line in invoice.lines.all()]
-    covered_any = False
-    all_covered = bool(invoice_lines)
-    discrepancy = ZERO
-    invalid_amounts = False
-    for order in case.purchase_orders.all():
-        order_lines = list(order.lines.all())
-        charges = ZERO
-        expected_total = order.subtotal - order.discount_amount + order.tax_amount + charges
-        line_total = sum((line.line_total for line in order_lines), ZERO) + charges
-        header_difference = abs(order.total_amount - expected_total)
-        line_difference = abs(order.total_amount - line_total)
-        if header_difference > PRICE_TOLERANCE:
-            discrepancy += header_difference
-        if line_difference > PRICE_TOLERANCE:
-            discrepancy += line_difference
-        for line in order_lines:
-            if line_amount_issues(line, "quantity_ordered", PRICE_TOLERANCE):
-                invalid_amounts = True
-                discrepancy += line_amount_difference(line, "quantity_ordered")
-    for invoice in invoices:
-        expected_total = invoice.subtotal - invoice.discount_amount + invoice.tax_amount + ZERO
-        header_difference = abs(invoice.total_amount - expected_total)
-        line_difference = abs(
-            invoice.total_amount
-            - (sum((line.line_total for line in invoice.lines.all()), ZERO) + ZERO)
-        )
-        if header_difference > PRICE_TOLERANCE:
-            discrepancy += header_difference
-        if line_difference > PRICE_TOLERANCE:
-            discrepancy += line_difference
-        if invoice.invoice_status == "void":
-            discrepancy += invoice.total_amount
-    for line in invoice_lines:
-        covered = (
-            case.line_matches.filter(invoice_line=line, match_status="matched").aggregate(
-                total=Sum("matched_quantity")
-            )["total"]
-            or ZERO
-        )
-        covered_any = covered_any or covered > ZERO
-        all_covered = all_covered and line.quantity_invoiced > ZERO and covered == line.quantity_invoiced
-        if line_amount_issues(line, "quantity_invoiced", PRICE_TOLERANCE):
-            invalid_amounts = True
-            discrepancy += line_amount_difference(line, "quantity_invoiced")
-        elif covered < line.quantity_invoiced:
-            discrepancy += (line.quantity_invoiced - covered) * line.unit_price
-    invalid_match = False
-    for match in case.line_matches.filter(match_status="matched"):
-        try:
-            match.clean()
-        except ValidationError:
-            invalid_match = True
-            # Arithmetic discrepancies were counted above, including legacy saved matches.
-            if not (line_amount_issues(match.invoice_line, "quantity_invoiced", PRICE_TOLERANCE)
-                    or (match.purchase_order_line and line_amount_issues(match.purchase_order_line, "quantity_ordered", PRICE_TOLERANCE))):
-                discrepancy += match.invoice_line.unit_price * match.matched_quantity
-    has_exception = (
-        invalid_match
-        or invalid_amounts
-        or case.line_matches.filter(match_status="exception").exists()
-        or any((invoice.invoice_status == "void" for invoice in invoices))
-    )
-    if has_exception or (discrepancy > PRICE_TOLERANCE and all_covered):
-        status = "exception"
-    elif all_covered:
-        status = "matched"
-    elif covered_any:
-        status = "partial"
-    else:
-        status = "pending"
-    with localcontext() as amount_context:
-        amount_context.prec = 40
-        discrepancy = discrepancy.quantize(Decimal("0.01"))
-    # Return a validation message rather than persisting an unreadable monetary value.
-    case._meta.get_field("total_discrepancy_amount").clean(discrepancy, case)
-    return (status, discrepancy)
+    """Keep the public tuple contract; detailed findings are available to the workspace."""
+    result = evaluate_reconciliation(case)
+    return result["status"], result["discrepancy"]
 
 
 def validate_case(case: Transaction) -> None:

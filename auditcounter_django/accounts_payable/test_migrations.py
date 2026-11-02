@@ -13,7 +13,6 @@ class SimplificationMigrationTests(TransactionTestCase):
         executor = MigrationExecutor(connection)
         after = [
             node for node in executor.loader.graph.leaf_nodes()
-            if node[0] in ("accounts_payable", "accounts_receivable")
         ]
         before = [
             ("accounts_payable", "0007_companypayment_ap_payment_source_record_uq_and_more"),

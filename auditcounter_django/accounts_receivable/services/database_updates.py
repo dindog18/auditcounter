@@ -4,6 +4,8 @@ Review does not write anything. The signed receipt binds the entire source resul
 destination records and configuration. Apply streams and validates again inside a
 local transaction; an error or changed result rolls back every accounting write.
 """
+
+from discrepancies.services import defer_reconciliation
 import hashlib
 import json
 from copy import copy
@@ -152,6 +154,8 @@ def uniqueness(record):
             yield encoded([names, values])
 
 
+@transaction.atomic
+@defer_reconciliation()
 def write_candidate(header, lines, previous, operation):
     if operation == 'unchanged':
         return
@@ -217,7 +221,7 @@ def apply(mode, config, user, operation, token, messages=None):
     if receipt.get('identity') != identity(mode, config, user) or receipt.get('operation') != operation:
         raise ValidationError('The setup or source connection changed. Run the full review again.', code='conflict')
     Run = model(mode, 'DatabaseImportRun')
-    with transaction.atomic():
+    with transaction.atomic(), defer_reconciliation():
         source = DatabaseSource.objects.select_for_update().get(pk=config.database_source_id)
         if not source.enabled or source.updated_at != config.database_source.updated_at:
             raise ValidationError('The database connection changed. Review again.', code='conflict')

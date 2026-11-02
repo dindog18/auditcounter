@@ -82,3 +82,31 @@ class ReceivablesMatchTests(TestCase):
                 customer=customer, source_database=source, source_table=table,
                 source_record_key={"invoice_id": 42}, currency="PHP",
             )
+
+
+from .matching_test_support import PartialDeliveryScenarios
+
+
+class ReceivablesPartialDeliveryTests(PartialDeliveryScenarios, TestCase):
+    mode = 'ar'
+
+
+from .auto_matching_test_support import AutoMatchingScenarios
+
+
+class ReceivablesAutoMatchingTests(AutoMatchingScenarios, TestCase):
+    mode = 'ar'
+
+
+from discrepancies.test_support import FindingScenarios
+
+
+class ReceivablesFindingTests(FindingScenarios, TestCase):
+    mode = 'ar'
+
+
+from discrepancies.investigation_test_support import InvestigationScenarios
+
+
+class ReceivablesInvestigationTests(InvestigationScenarios, TestCase):
+    mode = 'ar'

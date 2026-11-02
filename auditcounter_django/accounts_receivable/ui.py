@@ -111,7 +111,7 @@ def render_workspace(request, mode, resource="overview", screen="list", record_i
         target = {"parties": party_key(mode), "reconciliation": "Transaction", "configuration": "ExtractionConfiguration", "llm-logs": "LLMExtractionLog", **RECORD_RESOURCES}[resource]
         get_object_or_404(model(mode, target), pk=record_id)
     return render(request, "accounting/setup.html" if screen == "configuration" else "accounting/workspace.html", {
-        "finance_state": pages.workspace_state(mode, resource),
+        "finance_state": pages.workspace_state(mode, resource, record_id=record_id, screen=screen),
         "page_title": f"{label} · {title}", "section": "receivables" if receivable else "payables",
         "workspace_name": title, "finance_navigation": navigation, "finance_resource": resource,
         "finance_config": config,

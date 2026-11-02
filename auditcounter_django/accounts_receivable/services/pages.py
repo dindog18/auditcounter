@@ -100,7 +100,7 @@ def llm_log(row):
     return result
 
 
-def workspace_state(mode, resource):
+def workspace_state(mode, resource, record_id=None, screen=None):
     state = {"parties": [party(row, mode) for row in model(mode, party_key(mode)).objects.all()], "today": timezone.localdate().isoformat()}
     if resource == "configuration":
         from document_extraction.models import DocExtractionLog
@@ -121,11 +121,16 @@ def workspace_state(mode, resource):
     amount_issues = {key: {line["id"]: line["amountIssues"] for row in state[key] for line in row["lines"]}
                      for key in ("purchase-orders", "invoices")}
     state["reconciliation"] = []
+    from discrepancies.presentation import serialize_findings, serialize_investigation
+    from importlib import import_module
+    evaluator = import_module(model(mode, "Transaction").__module__.rsplit(".", 1)[0] + ".services.reconciliation").evaluate_reconciliation
     for row in model(mode, "Transaction").objects.all():
         membership = case_membership(row)
         calculation_issue = ""
+        evaluation = None
         try:
-            status, discrepancy = row.calculate_reconciliation()
+            evaluation = evaluator(row)
+            status, discrepancy = evaluation["status"], evaluation["discrepancy"]
         except ValidationError as error:
             status, discrepancy = "exception", None
             calculation_issue = "; ".join(error.messages)
@@ -138,7 +143,12 @@ def workspace_state(mode, resource):
             if match_status == "matched" and (amount_issues["invoices"].get(match.invoice_line_id)
                                                or amount_issues["purchase-orders"].get(match.purchase_order_line_id)):
                 match_status = "exception"
-            comparisons.append({"invoiceId": invoice, "invoiceLine": invoice_index, "orderId": order, "orderLine": order_index, "receiptId": receipt, "receiptLine": receipt_index, "quantity": number(match.matched_quantity), "status": match_status})
+            comparisons.append({"invoiceId": invoice, "invoiceLine": invoice_index, "orderId": order, "orderLine": order_index, "receiptId": receipt, "receiptLine": receipt_index, "quantity": number(match.matched_quantity), "status": match_status, "skuIdentity": match.sku_identity_snapshot})
+        investigation, investigation_revision = serialize_investigation(row)
+        sku_state = None
+        if resource=='reconciliation' and screen=='match' and row.pk==record_id:
+            from sku_matching.services.presentation import workspace_state as sku_workspace
+            sku_state = sku_workspace(row)
         # Recheck old saved cases on read without rewriting source records or cached decisions.
-        state["reconciliation"].append({"id": row.pk, "reference": f"{mode.upper()}-{row.pk}", "partyId": getattr(row, party_key(mode)+"_id"), "date": text_date(row.transaction_date), "currency": row.currency, "notes": row.notes, "status": status, "discrepancy": number(discrepancy) if discrepancy is not None else None, "calculationIssue": calculation_issue, "reconciledAt": text_date(row.reconciled_at), "orderIds": membership["purchase_orders"], "receiptIds": membership["delivery_receipts"], "invoiceIds": membership["sales_invoices"], "matches": comparisons, "revision": revision(row, membership), "matchRevision": revision(row, [membership, matches(row)])})
+        state["reconciliation"].append({"id": row.pk, "reference": f"{mode.upper()}-{row.pk}", "partyId": getattr(row, party_key(mode)+"_id"), "date": text_date(row.transaction_date), "currency": row.currency, "notes": row.notes, "status": status, "discrepancy": number(discrepancy) if discrepancy is not None else None, "calculationIssue": calculation_issue, "evaluation": evaluation, "findings": serialize_findings(row), "investigation": investigation, "investigationRevision": investigation_revision, "sku": sku_state, "reconciledAt": text_date(row.reconciled_at), "orderIds": membership["purchase_orders"], "receiptIds": membership["delivery_receipts"], "invoiceIds": membership["sales_invoices"], "matches": comparisons, "revision": revision(row, membership), "matchRevision": revision(row, [membership, matches(row)])})
     return state

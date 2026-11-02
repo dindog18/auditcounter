@@ -24,7 +24,7 @@
   const a = (href, text, cls = '') => `<a class="${cls}" href="${esc(href)}">${text}</a>`;
   const button = (href, text, primary = false, symbol = '') => a(href, `${symbol ? icon(symbol) : ''}${text}`, `btn ${primary ? 'btn-primary' : 'btn-falcon-default'}`);
   const badge = status => {
-    const tone = ['paid','cleared','matched','active','accepted','delivered','closed'].includes(status) ? 'success' : ['exception','disputed','rejected','reversed','overdue','void'].includes(status) ? 'danger' : ['partial','partially_paid','partially_accepted','pending','unpaid'].includes(status) ? 'warning' : status === 'open' || status === 'posted' ? 'info' : '';
+    const tone = ['paid','cleared','matched','active','accepted','delivered','closed'].includes(status) ? 'success' : ['exception','disputed','rejected','reversed','overdue','void'].includes(status) ? 'danger' : ['partial','partially_paid','partially_accepted','pending','unpaid','needs_review','unmatched'].includes(status) ? 'warning' : status === 'open' || status === 'posted' || status === 'suggested' ? 'info' : '';
     return `<span class="finance-status ${tone}">${esc(label(status))}</span>`;
   };
   const sourceLabel = source => ({document:'Document extraction', database:'Database extraction'}[source] || 'Source unavailable');
@@ -259,9 +259,65 @@
   }
   function caseDetail(record) {
     const docs=[['purchase-orders','orderIds','Purchase orders'],['delivery-receipts','receiptIds','Delivery receipts'],['invoices','invoiceIds','Invoices']];
-    root.insertAdjacentHTML('beforeend',`<div class="finance-kpis">${kpi('Reconciliation',label(record.status),'Document matching status','check-double')}${kpi('Discrepancy',record.discrepancy === null ? 'Review amounts' : money(record.discrepancy),'Document mismatch amount in '+record.currency,'exclamation-triangle',record.discrepancy !== null)}${kpi('Matched lines',record.matches.filter(row=>row.status==='matched').length,`${record.matches.length} invoice lines in this case`,'list')}${kpi('Currency',record.currency,'All linked documents share a currency','coins')}</div>`+
+    root.insertAdjacentHTML('beforeend',`<div class="finance-kpis">${kpi('Reconciliation',label(record.status),'Document matching status','check-double')}${kpi('Discrepancy',record.discrepancy === null ? 'Review amounts' : money(record.discrepancy),'Document mismatch amount in '+record.currency,'exclamation-triangle',record.discrepancy !== null)}${kpi('Matched allocations',record.matches.filter(row=>row.status==='matched').length,`${record.matches.length} allocations in this case`,'list')}${kpi('Currency',record.currency,'All linked documents share a currency','coins')}</div>`+
       (record.status==='exception'?`<div class="finance-callout warning">${esc(record.calculationIssue || 'Document quantities, prices, or totals need review. Open line matching to inspect the discrepancy before resolving this case.')}</div>`:'')+
-      `<div class="finance-grid"><div>${card('Documents in this case',`<div class="finance-card-body"><div class="finance-process" style="grid-template-columns:repeat(3,minmax(0,1fr))">${docs.map(([kind,key,title])=>`<div><h3 class="fs-10 mb-3">${title}</h3>${record[key].map(id=>{const row=find(kind,id);return `<div class="mb-3">${a(url(kind,id),esc(row.reference),'fw-semibold')}<div class="mt-2">${badge(kind==='invoices'?row.invoiceStatus:row.status)}</div></div>`;}).join('') || '<span class="text-600">No document linked</span>'}</div>`).join('')}</div></div>`)}${card('Line matches',matchSummary(record),a(url('reconciliation',record.id,'match'),'Open matching workspace '+icon('arrow-right')))}${card('Case notes',`<div class="finance-card-body">${esc(record.notes || 'No notes added.')}</div>`)}</div><aside>${card('Case details',`<div class="finance-card-body">${meta([[config.party,a(url('parties',record.partyId),esc(partyName(record)))],['Transaction date',date(record.date)],['Currency',record.currency],['Reconciled at',record.reconciledAt?date(record.reconciledAt):'Not recorded']],true)}</div>`)}<div class="finance-callout">Matching groups document lines. Payment allocation is tracked separately and determines the invoice balance.</div></aside></div>`);
+      `<div class="finance-grid"><div>${investigationOverview(record)}${card('Documents in this case',`<div class="finance-card-body"><div class="finance-process" style="grid-template-columns:repeat(3,minmax(0,1fr))">${docs.map(([kind,key,title])=>`<div><h3 class="fs-10 mb-3">${title}</h3>${record[key].map(id=>{const row=find(kind,id);return `<div class="mb-3">${a(url(kind,id),esc(row.reference),'fw-semibold')}<div class="mt-2">${badge(kind==='invoices'?row.invoiceStatus:row.status)}</div></div>`;}).join('') || '<span class="text-600">No document linked</span>'}</div>`).join('')}</div></div>`)}${card('Line matches',matchSummary(record),a(url('reconciliation',record.id,'match'),'Open matching workspace '+icon('arrow-right')))}${discrepancyFindings(record)}${investigationHistory(record)}${card('Case notes',`<div class="finance-card-body">${esc(record.notes || 'No notes added.')}</div>`)}</div><aside>${card('Case details',`<div class="finance-card-body">${meta([[config.party,a(url('parties',record.partyId),esc(partyName(record)))],['Transaction date',date(record.date)],['Currency',record.currency],['Reconciled at',record.reconciledAt?date(record.reconciledAt):'Not recorded']],true)}</div>`)}<div class="finance-callout">Matching groups document lines. Payment allocation is tracked separately and determines the invoice balance.</div></aside></div>`);
+    root.querySelector('#recalculate-case').addEventListener('click',async()=>{
+      try { await api.post('recalculate',record.id,{revision:record.matchRevision});location.reload(); }
+      catch(error) { showError(error.message); }
+    });
+    if(record.investigationRevision) bindInvestigation(record);
+  }
+  function discrepancyFindings(record) {
+    const valueText=value=>Object.entries(value || {}).map(([key,value])=>`${label(key)}: ${typeof value==='object'?JSON.stringify(value):value}`).join(' · ');
+    const timestamp=value=>value?new Date(value).toLocaleString():'—';
+    const findings=record.findings || [];
+    return card('Discrepancy Findings',`<div class="finance-card-body"><p>Findings preserve source observations and history. Potential differences require investigation and are not confirmed claims. Finding amounts can overlap; use the case discrepancy above for the aggregate. Cleared findings retain their last discrepant values and supporting history.</p>${findings.map(finding=>`<article id="finding-${finding.id}" class="border-top py-3"><div class="d-flex flex-wrap gap-2 align-items-center"><strong>${esc(label(finding.code))}</strong><span class="finance-status ${finding.severity==='critical'?'danger':finding.severity==='warning'?'warning':'info'}">${esc(label(finding.severity))}</span><span class="finance-status ${finding.status==='cleared'?'success':'warning'}">${esc(label(finding.status))}</span></div><p class="mt-2">${esc(finding.summary)}</p><dl><dt>${finding.status==='cleared'?'Expected at last detection':'Expected'}</dt><dd>${esc(valueText(finding.expected))}</dd><dt>${finding.status==='cleared'?'Actual at last detection':'Actual'}</dt><dd>${esc(valueText(finding.actual))}</dd><dt>${finding.status==='cleared'?'Historical difference':'Calculated difference'}</dt><dd>${finding.difference===null?'Evidence gap or amount not sufficiently supported':esc(finding.currency)+' '+money(finding.difference)}</dd></dl><p class="text-600">First detected: ${esc(timestamp(finding.firstDetectedAt))} · Latest detection: ${esc(timestamp(finding.lastDetectedAt))}${finding.clearedAt?' · Cleared: '+esc(timestamp(finding.clearedAt)):''} · Rule ${esc(finding.ruleVersion)}</p><details><summary>Supporting evidence and history (${finding.evidence.length})</summary>${finding.evidence.map(evidence=>`<details class="border-top py-3"><summary><strong>${esc(evidence.type)} · ${esc(evidence.reference || evidence.recordId)}${evidence.lineNo?' · Line '+esc(evidence.lineNo):''}</strong> · ${esc(timestamp(evidence.capturedAt))}</summary><div class="finance-actions my-2">${evidence.recordUrl?a(evidence.recordUrl,'Open accounting record'):''}${evidence.documentUrl?a(evidence.documentUrl,'Open original document'):''}${evidence.databaseUrl?a(evidence.databaseUrl,'Open database source'):''}</div><p class="text-600">Captured: ${esc(timestamp(evidence.capturedAt))}${evidence.provenance.file_name?' · '+esc(evidence.provenance.file_name):''}${evidence.provenance.table_name?' · '+esc(evidence.provenance.table_name):''}</p>${Object.keys(evidence.sourceKey || {}).length?`<p>ERP record key: <code>${esc(JSON.stringify(evidence.sourceKey))}</code></p>`:''}<div class="text-600">${esc(evidence.sourceModel)} #${esc(evidence.recordId)}${evidence.lineId?' · Line ID '+esc(evidence.lineId):''}</div><div>Observed ${esc(label(evidence.field))}</div><pre class="p-2 bg-100" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify(evidence.observed,null,2))}</pre><details><summary>Finding at capture</summary><pre class="p-2 bg-100" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify(evidence.findingSnapshot,null,2))}</pre></details></details>`).join('')}</details>${findingReview(record,finding)}</article>`).join('') || '<p class="text-600">No persisted findings. Recalculate this case to evaluate current evidence.</p>'}</div>`,`<button type="button" class="btn btn-outline-primary" id="recalculate-case">Recalculate findings</button>`);
+  }
+  function investigationActor(key) {
+    return `<div class="finance-field"><label for="inv-actor-${key}">Staff label (optional, unverified)</label><input class="form-control" id="inv-actor-${key}" name="actor_label" maxlength="150"></div>`;
+  }
+  function investigationOverview(record) {
+    const inv=record.investigation;
+    const findings=record.findings || [];
+    const evaluation=record.evaluation;
+    const exposure=evaluation?evaluation.exposureComplete===false?'Source amounts require review':`Unsupported invoice value: ${esc(record.currency)} ${money(evaluation.unsupportedAmount)} · Overcharge difference: ${esc(record.currency)} ${money(evaluation.overcharge)} · Undercharge difference: ${esc(record.currency)} ${money(evaluation.undercharge)}`:'Recalculate to inspect financial differences.';
+    const summary=`<p>Open findings: <strong>${findings.filter(row=>row.status==='open').length}</strong></p><div><strong>Potential financial exposure</strong><p>${exposure}</p><p class="text-600">These are potential differences, not recovered funds. Investigation decisions remain separate from calculated reconciliation.</p></div>`;
+    if(!inv) return card('Investigation Overview',`<div class="finance-card-body">${summary}<p>No investigation has been opened for this case.</p><form data-investigation-action="investigation-start">${investigationActor('start')}<button class="btn btn-primary mt-3" type="submit">Start investigation</button></form></div>`);
+    const stamp=value=>value?new Date(value).toLocaleString():'—';
+    const state=`<div class="d-flex gap-2 flex-wrap mb-3"><span class="finance-status ${inv.closed?'success':inv.workflowStatus==='waiting'?'warning':'info'}">${esc(label(inv.workflowStatus))}</span>${inv.reviewRequired?'<span class="finance-status warning">Renewed review required</span>':''}</div>`;
+    const lastResolution=inv.resolutionType?`<div class="border-top pt-3"><strong>${inv.closed?'Documented resolution':'Previous documented resolution'}</strong><p>${esc(label(inv.resolutionType))}</p><p style="white-space:pre-wrap">${esc(inv.resolutionNotes)}</p><p>Evidence references recorded: ${inv.resolutionEvidence.length}</p></div>`:'';
+    const update=inv.closed?`<p>Department: ${esc(inv.responsibleDepartment || 'Not recorded')}</p><p>Recorded next action: ${esc(inv.nextAction || 'Not recorded')}</p>`:`<form data-investigation-action="investigation-update" class="border-top pt-3"><div class="finance-field"><label for="investigation-status">Investigation status</label><select class="form-select" id="investigation-status" name="workflow_status">${inv.availableStatuses.map(status=>`<option value="${esc(status)}" ${status===inv.workflowStatus?'selected':''}>${esc(label(status))}</option>`).join('')}</select></div><div class="finance-field"><label for="investigation-department">Responsible department</label><input class="form-control" id="investigation-department" name="responsible_department" maxlength="120" value="${esc(inv.responsibleDepartment)}"></div><div class="finance-field"><label for="investigation-next-action">Next action</label><textarea class="form-control" id="investigation-next-action" name="next_action" maxlength="2000">${esc(inv.nextAction)}</textarea></div>${investigationActor('update')}<button class="btn btn-outline-primary mt-3" type="submit">Update investigation</button></form>`;
+    const documentOptions=[['purchase-orders','orderIds','purchase_order'],['delivery-receipts','receiptIds','delivery_receipt'],['invoices','invoiceIds','sales_invoice']].flatMap(([kind,ids,target])=>record[ids].map(id=>`<option value="${target}:${id}">${esc(find(kind,id).reference)} · ${esc(label(target))}</option>`)).join('');
+    const evidenceOptions=findings.flatMap(finding=>[...finding.evidence].reverse().map(evidence=>`<option value="${evidence.id}">${esc(label(finding.code))} · ${esc(evidence.type)} ${esc(evidence.reference || evidence.recordId)} · ${esc(stamp(evidence.capturedAt))}</option>`)).join('');
+    const closureStatuses=['resolved','dismissed'].filter(status=>inv.closureStatuses.includes(status));
+    const closure=closureStatuses.length?`<details class="border-top pt-3 mt-3"><summary>Record resolution or dismissal</summary><form data-investigation-action="investigation-resolve" class="mt-3"><div class="finance-field"><label for="investigation-close-status">Closure status</label><select class="form-select" id="investigation-close-status" name="workflow_status">${closureStatuses.map(status=>`<option value="${status}">${esc(label(status))}</option>`).join('')}</select></div><div class="finance-field"><label for="investigation-resolution-type">Resolution type</label><select class="form-select" id="investigation-resolution-type" name="resolution_type" required><option value="">Select an outcome</option>${inv.resolutionTypes.map(type=>`<option value="${esc(type.value)}">${esc(type.label)}</option>`).join('')}</select></div><div class="finance-field"><label for="investigation-resolution-notes">Resolution explanation</label><textarea class="form-control" id="investigation-resolution-notes" name="resolution_notes" maxlength="10000" required></textarea></div><p>Correction-based outcomes require a matched recalculation and current supporting evidence. Other outcomes require current reviews of all open findings.</p><div class="finance-field"><label for="investigation-documents">Supporting linked documents</label><select class="form-select" id="investigation-documents" name="document_references" multiple size="4">${documentOptions}</select></div><div class="finance-field"><label for="investigation-evidence">Supporting saved evidence snapshots</label><select class="form-select" id="investigation-evidence" name="evidence_ids" multiple size="4">${evidenceOptions}</select></div><p class="text-600">Select one or more references. Historical snapshots alone may not verify a current correction.</p>${investigationActor('resolve')}<button class="btn btn-primary mt-3" type="submit">Save documented outcome</button></form></details>`:'';
+    const reopen=inv.closed?`<form data-investigation-action="investigation-reopen" class="border-top pt-3 mt-3"><div class="finance-field"><label for="investigation-reopen-reason">Reopening reason</label><textarea class="form-control" id="investigation-reopen-reason" name="reason" maxlength="10000" required></textarea></div>${investigationActor('reopen')}<button class="btn btn-outline-primary mt-3" type="submit">Reopen investigation</button></form>`:'';
+    return card('Investigation Overview',`<div class="finance-card-body">${state}${inv.reviewRequired?`<div class="finance-callout warning">${esc(inv.reviewReason)}</div>`:''}${summary}<p class="text-600">Opened: ${esc(stamp(inv.openedAt))} · Updated: ${esc(stamp(inv.updatedAt))}${inv.closedAt?' · Closed: '+esc(stamp(inv.closedAt)):''}</p>${lastResolution}${update}${closure}${reopen}<form data-investigation-action="investigation-note" class="border-top pt-3 mt-3"><div class="finance-field"><label for="investigation-note">Investigation note</label><textarea class="form-control" id="investigation-note" name="notes" maxlength="10000" required></textarea></div>${investigationActor('note')}<button class="btn btn-outline-primary mt-3" type="submit">Add investigation note</button></form></div>`);
+  }
+  function findingReview(record,finding) {
+    const current=finding.reviewDecision || 'unreviewed';
+    const display=`<div class="mt-3"><strong>Human review: ${esc(label(current))}</strong>${finding.reviewedAt?`<span class="subtext">Reviewed: ${esc(new Date(finding.reviewedAt).toLocaleString())}</span>`:''}${finding.reviewStale?'<p class="text-warning">Evidence changed since this review. Review the current finding again before closing.</p>':''}${finding.reviewNotes?`<p style="white-space:pre-wrap">${esc(finding.reviewNotes)}</p>`:''}</div>`;
+    if(!record.investigation || record.investigation.closed) return display+`<p class="text-600">${record.investigation?'Reopen the investigation':'Start an investigation'} to record finding reviews.</p>`;
+    return display+`<form data-investigation-action="finding-review" class="border-top py-3"><input type="hidden" name="finding_id" value="${finding.id}"><div class="finance-field"><label for="review-decision-${finding.id}">Review decision</label><select class="form-select" id="review-decision-${finding.id}" name="decision">${['unreviewed','confirmed','dismissed','needs_more_evidence'].map(decision=>`<option value="${decision}" ${decision===current?'selected':''}>${esc(label(decision))}</option>`).join('')}</select></div><div class="finance-field"><label for="review-notes-${finding.id}">Review reason (required for dismissal)</label><textarea class="form-control" id="review-notes-${finding.id}" name="notes" maxlength="10000">${esc(finding.reviewNotes || '')}</textarea></div>${investigationActor('review-'+finding.id)}<button class="btn btn-outline-primary mt-3" type="submit">Save finding review</button></form>`;
+  }
+  function investigationHistory(record) {
+    const history=record.investigation?.history || [];
+    return card('Investigation History',`<div class="finance-card-body">${history.length?`<ol class="list-unstyled">${history.map(activity=>`<li class="border-bottom py-3"><strong>${esc(label(activity.type))}</strong> <span class="text-600">${esc(new Date(activity.createdAt).toLocaleString())}</span>${activity.previousStatus!==activity.newStatus?`<p>${esc(label(activity.previousStatus || 'Not opened'))} → ${esc(label(activity.newStatus))}</p>`:''}${activity.type==='review'?`<p>${a('#finding-'+activity.findingId,'Finding #'+activity.findingId)} · ${esc(label(activity.details.decision))}</p>`:''}<p style="white-space:pre-wrap">${esc(activity.notes)}</p><p class="text-600">${activity.actorLabel?'Staff label (unverified): '+esc(activity.actorLabel):activity.type==='evidence_changed'?'System reconciliation':'No staff label supplied'}</p>${Object.keys(activity.details).length?`<details><summary>Decision and evidence recorded at this step</summary><pre class="p-2 bg-100" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify(activity.details,null,2))}</pre></details>`:''}</li>`).join('')}</ol>`:'<p class="text-600">Investigation activity will appear here after the investigation is opened.</p>'}</div>`);
+  }
+  function bindInvestigation(record) {
+    root.querySelectorAll('[data-investigation-action]').forEach(form=>form.addEventListener('submit',async event=>{
+      event.preventDefault();
+      const values=new FormData(form);
+      const payload={revision:record.investigationRevision};
+      for(const [key,value] of values) if(!['evidence_ids','document_references'].includes(key)) payload[key]=key==='finding_id'?Number(value):value;
+      if(form.dataset.investigationAction==='investigation-resolve') {
+        payload.evidence_ids=values.getAll('evidence_ids').map(Number);
+        payload.document_references=values.getAll('document_references').map(value=>{const [kind,id]=value.split(':');return {kind,record_id:Number(id)};});
+      }
+      try { await api.post(form.dataset.investigationAction,record.id,payload);location.reload(); }
+      catch(error) { showError(error.message); }
+    }));
   }
   function matchSummary(record) {
     return `<div class="table-responsive"><table class="table finance-table"><caption class="visually-hidden">Reconciliation line matches</caption><thead><tr><th>Invoice item</th><th>Order line</th><th>Receipt line</th><th class="text-end">Matched qty</th><th>Status</th></tr></thead><tbody>${record.matches.map(match=>{const invoice=find('invoices',match.invoiceId);const line=invoice.lines[match.invoiceLine];return `<tr><td>${esc(line.code)}<span class="subtext">${esc(invoice.reference)} · Line ${match.invoiceLine+1}</span></td><td>${esc(find('purchase-orders',match.orderId)?.reference || 'Unlinked')} · ${match.orderLine+1}</td><td>${esc(find('delivery-receipts',match.receiptId)?.reference || 'Unlinked')} · ${match.receiptLine+1}</td><td class="amount">${match.quantity}</td><td>${badge(match.status)}</td></tr>`;}).join('') || '<tr><td colspan="5" class="text-center p-4 text-600">No line matches. Open the matching workspace to link document lines.</td></tr>'}</tbody></table></div>`;
@@ -368,57 +424,171 @@
     });
   }
 
+  function skuAssistance(state) {
+    const option=item=>`<option value="${esc(item.key)}">${esc(item.code)} · ${esc(item.record_reference)} · ${esc(item.unit)}${item.needs_mapping?' · Requires identity review':''}</option>`;
+    return card('SKU matching assistance',`<div class="finance-card-body"><p>Different codes require an approved equivalence. AI proposes known products for human review. Approval confirms identity only; quantity, currency and financial checks still apply.</p>
+      <label class="form-label" for="sku-source">Original product in this case</label><select class="form-select mb-2" id="sku-source">${state.sources.map(option).join('')}</select><div id="sku-source-detail" class="mb-3"></div>
+      <div><button type="button" class="btn btn-outline-primary mb-3" data-sku-action="sku-suggest" ${state.sources.length?'':'disabled'}>Request AI suggestion</button></div><details class="mb-3"><summary>Manually select a known equivalent</summary><div class="mt-3">
+      <label class="form-label" for="sku-target">Manually select a known equivalent for approval</label><select class="form-select mb-2" id="sku-target"><option value="">Select known product</option>${state.targets.map(option).join('')}</select><div id="sku-target-detail" class="mb-3"></div>
+      <label class="form-label" for="sku-approval-note">Review explanation</label><textarea id="sku-approval-note" class="form-control mb-2" maxlength="10000"></textarea><button type="button" class="btn btn-outline-primary" data-sku-action="sku-approve">Approve selected equivalence</button></div></details>
+      <div data-sku-error class="finance-form-error mt-3" role="alert" hidden></div><div data-sku-progress role="status"></div></div>
+      <div class="finance-card-body border-top"><h3 class="fs-9">Proposals and mapping history</h3>${state.aliases.map(alias=>`<div class="border rounded p-3 mb-3" data-sku-alias="${alias.id}"><strong>${esc(alias.source_code)} → ${esc(alias.canonical_code)}</strong> ${badge(alias.status)}<div>${esc(alias.source_description)} → ${esc(alias.canonical_description)}</div><div>${esc(alias.source_system)} · ${esc(alias.unit)}</div><div>${alias.source_url?a(alias.source_url,'Original source record','primary-link'):''}${alias.canonical_url?' · '+a(alias.canonical_url,'Canonical source record','primary-link'):''}</div>${alias.status==='approved'&&!alias.target_current?'<p class="text-danger">The known target changed. This mapping no longer resolves product identity; review and deactivate it.</p>':''}<p>Proposal rationale: ${esc(alias.reason)}</p><p>${esc(alias.approval_notes)}</p>${['pending','approved'].includes(alias.status)?`<label class="form-label d-block">Review explanation<textarea class="form-control mb-2" data-sku-note maxlength="10000"></textarea></label><div>${alias.status==='pending'?'<button type="button" class="btn btn-outline-primary" data-sku-action="sku-approve">Approve proposal</button> <button type="button" class="btn btn-outline-danger" data-sku-action="sku-reject">Reject proposal</button>':'<button type="button" class="btn btn-outline-danger" data-sku-action="sku-deactivate">Deactivate mapping</button>'}</div>`:''}<details class="mt-2"><summary>Mapping history</summary>${alias.history.map(event=>`<div>${esc(event.at)} · ${esc(event.action)} · ${esc(event.notes)}</div>`).join('')}</details></div>`).join('')||'<p>No SKU equivalences have been proposed for this account.</p>'}</div>
+      <div class="finance-card-body border-top"><h3 class="fs-9">Recent AI requests</h3>${state.attempts.map(attempt=>`<div class="mb-3"><strong>${esc(attempt.source.code)}</strong> ${badge(attempt.status)} · ${esc(attempt.provider)} / ${esc(attempt.model)}<div>${esc(attempt.suggestion.reason||'')}</div>${attempt.errors.map(error=>`<div>${esc(error)}</div>`).join('')}</div>`).join('')||'<p>No AI requests. Deterministic matching works without a provider.</p>'}</div>`);
+  }
+
+  function bindSkuAssistance(record,onIdentityChanged) {
+    const panel=root.querySelector('#sku-assistance');
+    function render(selectedKey) {
+      panel.innerHTML=skuAssistance(record.sku);
+      const select=panel.querySelector('#sku-source');
+      if(selectedKey&&record.sku.sources.some(item=>item.key===selectedKey)) select.value=selectedKey;
+      function describe() {
+        const source=record.sku.sources.find(item=>item.key===select.value);
+        panel.querySelector('#sku-source-detail').innerHTML=source?`<p>${esc(source.description)} · ${esc(source.source_system)}</p>${a(source.record_url,'Original accounting record','primary-link')}${source.document_url?' · '+a(source.document_url,'Original document','primary-link'):''}${source.database_url?' · '+a(source.database_url,'ERP source','primary-link'):''}`:'';
+      }
+      select.addEventListener('change',describe);describe();
+      const targetSelect=panel.querySelector('#sku-target');
+      function describeTarget() {
+        const target=record.sku.targets.find(item=>item.key===targetSelect.value);
+        panel.querySelector('#sku-target-detail').innerHTML=target?`<p>${esc(target.description)} · ${esc(target.source_system)}</p>${a(target.record_url,'Canonical source record','primary-link')}`:'';
+      }
+      targetSelect.addEventListener('change',describeTarget);describeTarget();
+      for(const button of panel.querySelectorAll('[data-sku-action]')) button.addEventListener('click',async()=>{
+        const action=button.dataset.skuAction;
+        const source=record.sku.sources.find(item=>item.key===select.value);
+        const aliasNode=button.closest('[data-sku-alias]');
+        const alias=aliasNode&&record.sku.aliases.find(item=>item.id===Number(aliasNode.dataset.skuAlias));
+        const note=aliasNode?aliasNode.querySelector('[data-sku-note]').value:panel.querySelector('#sku-approval-note').value;
+        let body={revision:record.sku.revision};
+        const error=panel.querySelector('[data-sku-error]');error.hidden=true;
+        if(alias) body={...body,alias_id:alias.id,alias_revision:alias.revision,...(action==='sku-approve'?{approval_notes:note}:{reason:note})};
+        else if(action==='sku-suggest') body.source_reference=source?.reference;
+        else {
+          const target=record.sku.targets.find(item=>item.key===panel.querySelector('#sku-target').value);
+          body={...body,source_reference:source?.reference,canonical_reference:target?.reference,approval_notes:note};
+        }
+        panel.querySelectorAll('button').forEach(control=>control.disabled=true);
+        panel.querySelector('[data-sku-progress]').textContent=action==='sku-suggest'?'Checking known candidates. Existing allocations remain in your draft.':'Saving SKU review…';
+        try {
+          const response=await api.post(action,record.id,body);
+          record.sku=response.sku;
+          if(['sku-approve','sku-deactivate'].includes(action)) onIdentityChanged(response);
+          render(source?.key);
+        } catch(problem) {
+          error.textContent=problem.message;error.hidden=false;
+          panel.querySelector('[data-sku-progress]').textContent='';
+          panel.querySelectorAll('button').forEach(control=>control.disabled=false);
+        }
+      });
+    }
+    render();
+  }
+
   function matching(record) {
     const invoiceLines=record.invoiceIds.flatMap(invoiceId=>find('invoices',invoiceId).lines.map((line,index)=>({invoiceId,index,line})));
-    const options=(kind,ids,selectedId,selectedLine)=>'<option value="">Select a line</option>'+ids.flatMap(id=>find(kind,id).lines.map((line,index)=>`<option value="${id}:${index}" ${id===selectedId&&index===selectedLine?'selected':''}>${esc(find(kind,id).reference)} · ${index+1} · ${esc(line.code)} · ${kind==='delivery-receipts'?'accepted '+line.accepted:'qty '+line.quantity}</option>`)).join('');
+    const options=(kind,ids,selectedId,selectedLine,selectedSourceId)=>'<option value="">Select a line</option>'+ids.flatMap(id=>find(kind,id).lines.map((line,index)=>`<option value="${line.id}" ${line.id===selectedSourceId||(id===selectedId&&index===selectedLine)?'selected':''}>${esc(find(kind,id).reference)} · ${index+1} · ${esc(line.code)} · ${kind==='delivery-receipts'?'accepted '+line.accepted:'qty '+line.quantity}</option>`)).join('');
+    const allocation=(entry,match)=>`<tr data-allocation data-invoice-line="${entry.line.id}"><td><select class="form-select" data-order aria-label="Purchase order line">${options('purchase-orders',record.orderIds,match?.orderId,match?.orderLine,match?.orderLineId)}</select></td><td><select class="form-select" data-receipt aria-label="Delivery receipt line">${options('delivery-receipts',record.receiptIds,match?.receiptId,match?.receiptLine,match?.receiptLineId)}</select></td><td><input class="form-control finance-match-qty" type="number" min="0.0001" step="0.0001" value="${match?.quantity ?? ''}" data-quantity aria-label="Allocated quantity" required></td><td><button type="button" class="btn btn-link text-danger" data-remove>Remove allocation</button></td></tr>`;
     root.innerHTML=breadcrumb('Match '+record.reference)+heading('Match document lines',`${esc(record.reference)} · ${esc(partyName(record))} · ${esc(record.currency)}`,button(url('reconciliation',record.id),'Back to case'))+
-      '<div class="finance-callout">Link each invoice line to an order line and an accepted delivery line. Compare item codes, units, quantities, prices, tax, and discounts. Saved matches use the server’s quantity and price checks.</div>'+
-      `<form id="match-form"><div id="form-error" class="finance-form-error" role="alert" tabindex="-1" hidden></div>${card('Three-way matching',`<div class="table-responsive"><table class="table finance-table"><caption class="visually-hidden">Compare purchase order, delivery receipt, and invoice lines</caption><thead><tr><th>Invoice line</th><th>Purchase order line</th><th>Delivery receipt line</th><th>Matched qty</th><th>Result</th></tr></thead><tbody>${invoiceLines.map(({invoiceId,index,line})=>{const match=record.matches.find(row=>row.invoiceId===invoiceId&&row.invoiceLine===index);return `<tr data-match-invoice="${invoiceId}" data-match-line="${index}"><td><strong>${esc(line.code)}</strong><span class="subtext">${esc(find('invoices',invoiceId).reference)} · Line ${index+1}</span><span class="subtext">Billed ${line.quantity} ${esc(line.unit)} × PHP ${money(line.price)}</span></td><td><select class="form-select" data-order aria-label="${esc(line.code)} purchase order line">${options('purchase-orders',record.orderIds,match?.orderId,match?.orderLine)}</select></td><td><select class="form-select" data-receipt aria-label="${esc(line.code)} delivery receipt line">${options('delivery-receipts',record.receiptIds,match?.receiptId,match?.receiptLine)}</select></td><td><input class="form-control finance-match-qty" type="number" min="0" max="${line.quantity}" step="0.0001" value="${match?.quantity ?? line.quantity}" data-quantity aria-label="${esc(line.code)} matched quantity" required></td><td data-match-result></td></tr>`;}).join('')}</tbody></table></div><div class="finance-card-body border-top" id="match-summary" role="status"></div>`,a(url('reconciliation',record.id,'edit'),'Edit linked documents'))}<div class="finance-form-footer"><span class="text-600 fs-10">Discrepancies remain visible as exceptions.</span><div class="finance-actions">${button(url('reconciliation',record.id),'Cancel')}<button class="btn btn-primary" type="submit">${icon('check-double')} Save matches</button></div></div></form>`;
-    function evaluate() {
-      const usedOrders=new Map();const usedReceipts=new Map();let discrepancy=0;let amountReview=false;
-      const rows=[...root.querySelectorAll('[data-match-invoice]')].map(element=>{
-        const invoiceId=Number(element.dataset.matchInvoice);const invoiceLine=Number(element.dataset.matchLine);const invoice=find('invoices',invoiceId).lines[invoiceLine];
-        const [orderId,orderLine]=(element.querySelector('[data-order]').value || '').split(':').map(Number);
-        const [receiptId,receiptLine]=(element.querySelector('[data-receipt]').value || '').split(':').map(Number);
-        const quantity=Number(element.querySelector('[data-quantity]').value);
-        const order=find('purchase-orders',orderId)?.lines[orderLine];const receipt=find('delivery-receipts',receiptId)?.lines[receiptLine];
-        let status='pending';let reason='Select order and receipt lines';
-        if(order&&receipt) {
-          const orderKey=`${orderId}:${orderLine}`;const receiptKey=`${receiptId}:${receiptLine}`;
-          // Other cases consume the same source quantities; the current case is replaced on save.
-          const otherMatches=data.reconciliation.filter(row=>row.id!==record.id).flatMap(row=>row.matches).filter(row=>row.status==='matched');
-          const otherOrdered=total(otherMatches.filter(row=>row.orderId===orderId&&row.orderLine===orderLine),row=>row.quantity);
-          const otherAccepted=total(otherMatches.filter(row=>row.receiptId===receiptId&&row.receiptLine===receiptLine),row=>row.quantity);
-          usedOrders.set(orderKey,(usedOrders.get(orderKey)||0)+quantity);usedReceipts.set(receiptKey,(usedReceipts.get(receiptKey)||0)+quantity);
-          const itemMismatch=invoice.code!==order.code || invoice.code!==receipt.code || invoice.unit!==order.unit || invoice.unit!==receipt.unit;
-          const priceMismatch=Math.abs(invoice.price-order.price)>.01 || Math.abs((invoice.taxRate || 0)-(order.taxRate || 0))>.0001 || Math.abs((invoice.discount/invoice.quantity)-(order.discount/order.quantity))>.01;
-          const quantityMismatch=quantity>invoice.quantity || invoice.quantity>receipt.accepted || invoice.quantity>order.quantity || usedOrders.get(orderKey)+otherOrdered>order.quantity || usedReceipts.get(receiptKey)+otherAccepted>receipt.accepted;
-          status=itemMismatch||priceMismatch||quantityMismatch?'exception':quantity<invoice.quantity?'pending':'matched';
-          reason=itemMismatch?'Item code or unit differs':priceMismatch?'Price, tax, or discount differs':quantityMismatch?'Quantity exceeds available lines':quantity<invoice.quantity?'Partially matched':'All checks passed';
-          if (!invoice.amountIssues?.length && !order.amountIssues?.length) discrepancy+=Math.max(0,invoice.quantity-Math.min(quantity,receipt.accepted))*invoice.price*(1+invoice.taxRate/100)+Math.abs(invoice.price-order.price)*quantity;
-        }
-        const amountIssues=[...(invoice.amountIssues || []),...(order?.amountIssues || [])];
-        if (amountIssues.length) { status='exception'; reason=amountIssues.join(' '); amountReview=true; }
-        element.querySelector('[data-match-result]').innerHTML=`${badge(status)}<span class="subtext">${esc(reason)}</span>`;
-        return {invoiceId,invoiceLine,orderId:orderId||null,orderLine:Number.isFinite(orderLine)?orderLine:null,receiptId:receiptId||null,receiptLine:Number.isFinite(receiptLine)?receiptLine:null,quantity,status};
-      });
-      const matched=rows.filter(row=>row.status==='matched').length;
-      const status=rows.some(row=>row.status==='exception')?'exception':rows.length&&matched===rows.length?'matched':matched>0||rows.some(row=>row.orderId&&row.receiptId&&row.quantity>0)?'partial':'pending';
-      root.querySelector('#match-summary').innerHTML=`<div class="finance-actions justify-content-between"><span>Case status ${badge(status)}</span><span>${matched} / ${rows.length} lines fully matched</span><strong>${amountReview ? 'Review source amounts' : 'Discrepancy PHP '+money(discrepancy)}</strong></div>`;
-      return {matches:rows,status,discrepancy:Math.round(discrepancy*100)/100};
+      (record.sku?'<div id="sku-assistance"></div>':'')+
+      '<div class="finance-callout">Add an allocation for each delivery. Preview checks available quantities and document relationships on the server. Differences require investigation and are not automatically recoverable losses.</div>'+
+      `<form id="match-form"><div id="form-error" class="finance-form-error" role="alert" tabindex="-1" hidden></div><div id="auto-results" aria-live="polite"></div>${invoiceLines.map(entry=>card(`${esc(entry.line.code)} · ${esc(find('invoices',entry.invoiceId).reference)} · Line ${entry.index+1}`,`<div class="finance-card-body">Invoiced ${entry.line.quantity} ${esc(entry.line.unit)} × ${esc(record.currency)} ${money(entry.line.price)}<div data-line-summary="${entry.line.id}" role="status"></div></div><div class="table-responsive"><table class="table finance-table"><thead><tr><th>Purchase order line</th><th>Delivery receipt line</th><th>Allocated qty</th><th></th></tr></thead><tbody data-allocations="${entry.line.id}">${record.matches.filter(row=>row.invoiceId===entry.invoiceId&&row.invoiceLine===entry.index).map(match=>allocation(entry,match)).join('')}</tbody></table></div><div class="finance-card-body"><button type="button" class="btn btn-outline-primary" data-add="${entry.line.id}">Add allocation</button></div>`)).join('')}<div class="finance-card-body" id="match-summary" role="status"></div><div class="finance-form-footer"><div class="finance-actions">${button(url('reconciliation',record.id),'Cancel')}<button class="btn btn-outline-primary" type="button" id="auto-match">Auto Match</button><button class="btn btn-outline-primary" type="button" id="match-preview">Preview reconciliation</button><button class="btn btn-primary" id="match-save" type="submit" disabled>Save matches</button></div></div></form>`;
+    const form=root.querySelector('#match-form');
+    const save=root.querySelector('#match-save');
+    const payload=()=>({revision:record.matchRevision,...(suggestionRevision?{suggestionRevision,preserveExisting:true}:{}),matches:[...root.querySelectorAll('[data-allocation]')].map(element=>({
+      invoiceLineId:Number(element.dataset.invoiceLine),orderLineId:Number(element.querySelector('[data-order]').value)||null,
+      receiptLineId:Number(element.querySelector('[data-receipt]').value)||null,quantity:element.querySelector('[data-quantity]').value,
+    }))});
+    let suggestionRevision=null;
+    let autoChoices=[];
+    const sourceLine=(kind,id)=>data[kind].flatMap(document=>document.lines.map((line,index)=>({document,line,index}))).find(row=>row.line.id===id);
+    function suggestionLabel(candidate) {
+      const invoice=sourceLine('invoices',candidate.invoice_line_id);
+      const order=sourceLine('purchase-orders',candidate.purchase_order_line_id);
+      const receipt=sourceLine('delivery-receipts',candidate.delivery_receipt_line_id);
+      return `${invoice?.document.reference || ''} · ${invoice?.line.code || ''}${order?' → '+order.document.reference+' line '+(order.index+1):''}${receipt?' → '+receipt.document.reference+' line '+(receipt.index+1):''}`;
     }
-    root.querySelector('#match-form').addEventListener('input',evaluate);root.querySelector('#match-form').addEventListener('change',evaluate);evaluate();
-    root.querySelector('#match-form').addEventListener('submit', async event => {
+    function savedRows(locked) {
+      for(const element of root.querySelectorAll('[data-allocation]')) {
+        const saved=record.matches.some(match=>find('invoices',match.invoiceId).lines[match.invoiceLine].id===Number(element.dataset.invoiceLine)
+          &&find('purchase-orders',match.orderId)?.lines[match.orderLine]?.id===Number(element.querySelector('[data-order]').value)
+          &&find('delivery-receipts',match.receiptId)?.lines[match.receiptLine]?.id===Number(element.querySelector('[data-receipt]').value));
+        if(saved) element.querySelectorAll('input,select,button').forEach(control=>control.disabled=locked);
+      }
+    }
+    function showSuggestions(result) {
+      autoChoices=[];
+      const outcome=(item,group)=>{
+        const candidates=item.candidates || [item];
+        return `<div class="finance-card-body border-bottom" data-suggestion-group="${group}"><strong>${esc(suggestionLabel(item))}</strong> ${badge(item.status)}<ul>${item.reasons.map(reason=>`<li>${esc(reason)}</li>`).join('')}</ul>${candidates.map(candidate=>{
+          const index=autoChoices.push(candidate)-1;
+          return `<div class="mb-3"><div>${esc(suggestionLabel(candidate))}${candidate.matched_quantity?' · Proposed '+esc(candidate.matched_quantity):candidate.maximum_quantity?' · Available up to '+esc(candidate.maximum_quantity):''}</div>${candidate.price_variance!==undefined?`<div>Price variance (signed): ${esc(record.currency)} ${money(candidate.price_variance)}</div>`:''}${candidate!==item?`<ul>${candidate.reasons.map(reason=>`<li>${esc(reason)}</li>`).join('')}</ul>`:''}${candidate.eligible?`<button type="button" class="btn btn-outline-primary" data-auto-accept="${index}">${item.candidates?'Choose candidate and edit':candidate.status==='suggested'?'Accept suggested match':'Accept for review'}</button>`:'<span class="text-600">Resolve source issues or use manual matching.</span>'}</div>`;
+        }).join('')}<button type="button" class="btn btn-link text-danger" data-auto-reject>Reject suggestion</button></div>`;
+      };
+      const items=[...result.suggestions,...result.needs_review,...result.unmatched];
+      root.querySelector('#auto-results').innerHTML=card('Auto Match review',`<div class="finance-card-body"><p>Suggestions are not saved. Accept a relationship to add an editable allocation, then preview and save. Existing saved allocations are preserved; return to manual editing to change them.</p>${result.lines.map(line=>`<div>${esc(suggestionLabel(line))} · Unallocated before suggestions: ${esc(line.quantity_to_allocate)} · Remaining after proposed allocations: ${esc(line.remaining_unmatched_quantity)}</div>`).join('')}<button type="button" class="btn btn-link" data-auto-clear>Return to manual editing</button></div>${items.map(outcome).join('') || '<div class="finance-card-body">No new allocations are needed.</div>'}`);
+    }
+    root.querySelector('#auto-match').addEventListener('click',async()=>{
+      try {
+        const result=await api.post('match-suggestions',record.id,payload());
+        suggestionRevision=result.suggestion_revision;
+        // Restore any saved rows removed from the local draft: Auto Match always merges them.
+        for(const match of record.matches) {
+          const entry=invoiceLines.find(row=>row.invoiceId===match.invoiceId&&row.index===match.invoiceLine);
+          const orderId=find('purchase-orders',match.orderId)?.lines[match.orderLine]?.id;
+          const receiptId=find('delivery-receipts',match.receiptId)?.lines[match.receiptLine]?.id;
+          const present=[...root.querySelectorAll('[data-allocation]')].some(element=>Number(element.dataset.invoiceLine)===entry.line.id&&Number(element.querySelector('[data-order]').value)===(orderId||0)&&Number(element.querySelector('[data-receipt]').value)===(receiptId||0));
+          if(!present) root.querySelector(`[data-allocations="${entry.line.id}"]`).insertAdjacentHTML('beforeend',allocation(entry,match));
+        }
+        savedRows(true);showSuggestions(result);dirty();
+      } catch(error) { showError(error.message); }
+    });
+    form.addEventListener('click',event=>{
+      const accept=event.target.closest('[data-auto-accept]');
+      const reject=event.target.closest('[data-auto-reject]');
+      if(event.target.closest('[data-auto-clear]')) { suggestionRevision=null;autoChoices=[];savedRows(false);root.querySelector('#auto-results').innerHTML='';dirty(); }
+      if(reject) reject.closest('[data-suggestion-group]').remove();
+      if(accept) {
+        const candidate=autoChoices[Number(accept.dataset.autoAccept)];
+        const entry=invoiceLines.find(row=>row.line.id===candidate.invoice_line_id);
+        const duplicate=[...root.querySelectorAll('[data-allocation]')].some(element=>Number(element.dataset.invoiceLine)===candidate.invoice_line_id&&Number(element.querySelector('[data-order]').value)===candidate.purchase_order_line_id&&Number(element.querySelector('[data-receipt]').value)===candidate.delivery_receipt_line_id);
+        if(duplicate) { showError('This allocation is already in the draft. Edit its quantity instead.');return; }
+        root.querySelector(`[data-allocations="${entry.line.id}"]`).insertAdjacentHTML('beforeend',allocation(entry,{orderLineId:candidate.purchase_order_line_id,receiptLineId:candidate.delivery_receipt_line_id,quantity:candidate.matched_quantity || candidate.maximum_quantity}));
+        const group=accept.closest('[data-suggestion-group]');
+        group.querySelectorAll('button').forEach(control=>control.disabled=true);
+        group.insertAdjacentHTML('beforeend','<p class="finance-card-body">Added to draft. Edit the allocation below, preview, then save to confirm.</p>');
+        dirty();
+      }
+    });
+    function display(result) {
+      root.querySelector('#match-summary').innerHTML=`Case status ${badge(result.status)} · Differences requiring investigation: <strong>${esc(record.currency)} ${money(result.discrepancy)}</strong><br>Potential unsupported invoice amount: ${result.exposureComplete===false?'Source amounts require review':esc(record.currency)+' '+money(result.unsupportedAmount)} · Price variance (signed): ${esc(record.currency)} ${money(result.priceVariance)} · Net supported variance: ${esc(record.currency)} ${money(result.financialVariance)}<ul>${result.findings.map(finding=>`<li>${esc(finding.message)}${finding.amount!==null?' '+esc(record.currency)+' '+money(finding.amount):''}</li>`).join('')}</ul>`;
+      for(const line of result.lines) {
+        const element=root.querySelector(`[data-line-summary="${line.invoiceLineId}"]`);
+        if(element) element.textContent=`Total allocated: ${line.allocated} · Supported: ${line.supported} · Remaining unmatched: ${line.unmatched}`;
+      }
+    }
+    function dirty() { save.disabled=true;root.querySelector('#match-summary').textContent='Preview the current allocations before saving.';root.querySelectorAll('[data-line-summary]').forEach(element=>element.textContent='Preview required for current quantities.'); }
+    form.addEventListener('input',dirty);form.addEventListener('change',dirty);
+    form.addEventListener('click',event=>{
+      const add=event.target.closest('[data-add]');const remove=event.target.closest('[data-remove]');
+      if(add) { const entry=invoiceLines.find(row=>row.line.id===Number(add.dataset.add));root.querySelector(`[data-allocations="${entry.line.id}"]`).insertAdjacentHTML('beforeend',allocation(entry));dirty(); }
+      if(remove) { remove.closest('[data-allocation]').remove();dirty(); }
+    });
+    root.querySelector('#match-preview').addEventListener('click',async()=>{
+      if(!form.reportValidity()) return;
+      try { const result=await api.post('matches-preview',record.id,payload());display(result);save.disabled=false; }
+      catch(error) { save.disabled=true;showError(error.message); }
+    });
+    form.addEventListener('submit',async event=>{
       event.preventDefault();
-      const result=evaluate();
-      const rows=result.matches.map(row=>({
-        invoiceLineId:find('invoices',row.invoiceId).lines[row.invoiceLine].id,
-        orderLineId:find('purchase-orders',row.orderId)?.lines[row.orderLine]?.id || null,
-        receiptLineId:find('delivery-receipts',row.receiptId)?.lines[row.receiptLine]?.id || null,
-        quantity:row.quantity,
-      }));
-      try { await api.post('matches', record.id, {revision:record.matchRevision,matches:rows}); location.href=url('reconciliation',record.id); }
-      catch(error) { showError(error.message); }
+      try { await api.post('matches',record.id,payload());location.href=url('reconciliation',record.id); }
+      catch(error) { save.disabled=true;showError(error.message); }
+    });
+    if(record.evaluation) display(record.evaluation);
+    if(record.sku) bindSkuAssistance(record,response=>{
+      record.matchRevision=response.matchRevision;
+      suggestionRevision=null;autoChoices=[];savedRows(false);
+      root.querySelector('#auto-results').innerHTML='';
+      dirty();
     });
   }
 

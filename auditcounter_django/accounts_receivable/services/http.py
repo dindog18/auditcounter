@@ -39,6 +39,49 @@ def perform(request, mode, action, record_id=None):
         if action in {"parties", "reconciliation"}:
             record = records.save_party(mode, data, record_id) if action == "parties" else records.save_case(mode, data, record_id)
             return JsonResponse({"id": record.pk})
+        if action in {'sku-suggest','sku-approve','sku-reject','sku-deactivate','sku-mappings'} and record_id:
+            from sku_matching.services import mapping, suggestions
+            from sku_matching.services.presentation import workspace_state as sku_state
+            case=get_object_or_404(model(mode,'Transaction'),pk=record_id)
+            if action=='sku-suggest':
+                suggestions.suggest_sku_equivalence(case,data)
+            elif action!='sku-mappings':
+                operations={'sku-approve':mapping.approve_mapping,'sku-reject':mapping.reject_mapping,'sku-deactivate':mapping.deactivate_mapping}
+                operations[action](case,data)
+            else:
+                mapping.validate_body(data,())
+            response={'sku':sku_state(case)}
+            if action in {'sku-approve','sku-deactivate'}:
+                from .catalog import revision
+                case.refresh_from_db()
+                response['matchRevision']=revision(case,[records.case_membership(case),records.matches(case)])
+            return JsonResponse(response)
+        if action in {'investigation-start','investigation-update','investigation-note','finding-review','investigation-resolve','investigation-reopen'} and record_id:
+            from discrepancies.services import investigation
+            operations={'investigation-start':investigation.start_investigation,'investigation-update':investigation.update_investigation,
+                'investigation-note':investigation.add_investigation_note,'finding-review':investigation.review_finding,
+                'investigation-resolve':investigation.resolve_investigation,'investigation-reopen':investigation.reopen_investigation}
+            case=get_object_or_404(model(mode,'Transaction'),pk=record_id)
+            result=operations[action](case,data)
+            return JsonResponse({'id':result.pk,'case_id':case.pk})
+        if action == "recalculate" and record_id:
+            from .catalog import check_revision, party_key
+            with transaction.atomic():
+                case = get_object_or_404(model(mode,"Transaction"), pk=record_id)
+                if getattr(case,party_key(mode)+'_id'):
+                    model(mode,party_key(mode)).objects.select_for_update().get(pk=getattr(case,party_key(mode)+'_id'))
+                case = model(mode,"Transaction").objects.select_for_update().get(pk=record_id)
+                check_revision(case, data.get('revision'), [records.case_membership(case),records.matches(case)])
+                case.refresh_reconciliation_status()
+            return JsonResponse({'id':case.pk})
+        if action == "match-suggestions" and record_id:
+            from .auto_matching import generate_match_suggestions
+            from .catalog import check_revision
+            case = get_object_or_404(model(mode, "Transaction"), pk=record_id)
+            check_revision(case, data.get('revision'), [records.case_membership(case), records.matches(case)])
+            return JsonResponse(generate_match_suggestions(case, current_rows=data.get('matches')))
+        if action == "matches-preview" and record_id:
+            return JsonResponse(records.preview_matches(mode, record_id, data))
         if action in {"allocations", "matches"} and record_id:
             record = records.save_allocations(mode, record_id, data) if action == "allocations" else records.save_matches(mode, record_id, data)
             return JsonResponse({"id": record.pk})

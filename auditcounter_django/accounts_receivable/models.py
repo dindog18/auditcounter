@@ -681,12 +681,8 @@ class Transaction(models.Model):
         # Store the result calculated from current documents and line matches.
         if not self.pk:
             return
-        status, discrepancy = self.calculate_reconciliation()
-        type(self).objects.filter(pk=self.pk).update(
-            reconciliation_status=status, total_discrepancy_amount=discrepancy
-        )
-        self.reconciliation_status = status
-        self.total_discrepancy_amount = discrepancy
+        from discrepancies.services import refresh_transaction
+        refresh_transaction(self)
 
     def clean(self):
         # Validate business rules as well as individual field values.
@@ -957,6 +953,7 @@ class DocumentMatch(models.Model):
         validators=[MinValueValidator(Decimal("0"))],
     )
     match_status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    sku_identity_snapshot = models.JSONField(default=dict, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     transaction = models.ForeignKey(
@@ -988,6 +985,11 @@ class DocumentMatch(models.Model):
     def save(self, *args, **kwargs):
         # Lock the affected rows so concurrent matches or allocations cannot reuse them.
         with transaction.atomic():
+            if self.transaction_id:
+                case = Transaction.objects.get(pk=self.transaction_id)
+                if case.customer_id:
+                    Customer.objects.select_for_update().get(pk=case.customer_id)
+                Transaction.objects.select_for_update().get(pk=self.transaction_id)
             if self.invoice_line_id:
                 CompanySalesInvoiceLine.objects.select_for_update().get(pk=self.invoice_line_id)
             if self.purchase_order_line_id:
@@ -999,6 +1001,10 @@ class DocumentMatch(models.Model):
                     pk=self.delivery_receipt_line_id
                 )
             self.full_clean()
+            from sku_matching.services.mapping import identity_for_match
+            self.sku_identity_snapshot = identity_for_match(self)
+            if kwargs.get('update_fields') is not None:
+                kwargs['update_fields'] = set(kwargs['update_fields']) | {'sku_identity_snapshot'}
             result = super().save(*args, **kwargs)
             self.transaction.refresh_reconciliation_status()
             return result

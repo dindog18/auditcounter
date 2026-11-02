@@ -94,6 +94,8 @@ INSTALLED_APPS = [
     "accounts_payable.apps.AccountsPayableConfig",
     "accounts_receivable.apps.AccountsReceivableConfig",
     "router.apps.RouterConfig",
+    "discrepancies.apps.DiscrepanciesConfig",
+    "sku_matching.apps.SkuMatchingConfig",
     "encoder.apps.EncoderConfig",
 ]
 
