@@ -161,3 +161,29 @@ class CaseActivity(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError('Investigation activity cannot be deleted.')
+
+
+class CaseTimelineEvent(models.Model):
+    TYPES=[(v,v.replace('_',' ').title()) for v in ('case_created','documents_changed','matches_changed','source_changed','payments_changed','finding_detected','finding_changed','finding_cleared','finding_reopened','reconciliation_changed')]
+    ap_transaction=models.ForeignKey('accounts_payable.Transaction',null=True,blank=True,on_delete=models.PROTECT,related_name='timeline_events')
+    ar_transaction=models.ForeignKey('accounts_receivable.Transaction',null=True,blank=True,on_delete=models.PROTECT,related_name='timeline_events')
+    event_type=models.CharField(max_length=30,choices=TYPES)
+    event_key=models.CharField(max_length=64)
+    description=models.CharField(max_length=500)
+    occurred_at=models.DateTimeField(null=True,blank=True)
+    recorded_at=models.DateTimeField(auto_now_add=True)
+    source_model=models.CharField(max_length=150)
+    source_record_id=models.CharField(max_length=100)
+    details=models.JSONField(default=dict,blank=True)
+    evidence_snapshot_hash=models.CharField(max_length=64,blank=True)
+    objects=ActivityQuerySet.as_manager()
+    class Meta:
+        constraints=[models.CheckConstraint(condition=(Q(ap_transaction__isnull=False,ar_transaction__isnull=True)|Q(ap_transaction__isnull=True,ar_transaction__isnull=False)),name='timeline_one_case'),models.UniqueConstraint(fields=['ap_transaction','event_key'],condition=Q(ap_transaction__isnull=False),name='timeline_ap_key'),models.UniqueConstraint(fields=['ar_transaction','event_key'],condition=Q(ar_transaction__isnull=False),name='timeline_ar_key')]
+        indexes=[models.Index(fields=['ap_transaction','recorded_at','id'],name='timeline_ap_chrono'),models.Index(fields=['ar_transaction','recorded_at','id'],name='timeline_ar_chrono')]
+    def save(self,*args,**kwargs):
+        if not self._state.adding or (self.pk and type(self).objects.filter(pk=self.pk).exists()):
+            raise ValidationError('Timeline events are append-only.')
+        self.full_clean()
+        return super().save(*args,**kwargs)
+    def delete(self,*args,**kwargs):
+        raise ValidationError('Timeline events cannot be deleted.')

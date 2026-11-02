@@ -46,7 +46,7 @@ test('case recalculation sends the revision through the existing API then reload
   let handler,call,reloaded=false;
   const record={id:3,status:'matched',discrepancy:0,currency:'EUR',matches:[],orderIds:[],receiptIds:[],invoiceIds:[],findings:[],matchRevision:'revision'};
   const ctx={...context(record),root:{insertAdjacentHTML(){},querySelector:()=>({addEventListener:(_,fn)=>handler=fn})},
-    kpi:()=>'',icon:()=>'',matchSummary:()=>'',url:()=>'',meta:()=>'',date:()=>'',partyName:()=>'',config:{party:'Customer'},
+    timelinePanel:()=>'',bindTimeline:()=>{},kpi:()=>'',icon:()=>'',matchSummary:()=>'',url:()=>'',meta:()=>'',date:()=>'',partyName:()=>'',config:{party:'Customer'},
     location:{reload(){reloaded=true;}},showError:message=>{throw new Error(message);},api:{post:async(...args)=>{call=args;}}};
   vm.runInNewContext(segment+'\ncaseDetail(record);',ctx);
   await handler();

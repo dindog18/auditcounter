@@ -135,3 +135,5 @@
   .finance-aging-row { grid-template-columns:70px minmax(35px,1fr) 100px; gap:.6rem; }
 }
 @media(prefers-reduced-motion:reduce) { .finance-workspace * { transition:none !important; scroll-behavior:auto !important; } }
+
+.timeline-event pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto;font-size:.75rem}.timeline-event p{white-space:pre-wrap;overflow-wrap:anywhere}.timeline-event details{margin-top:.7rem}

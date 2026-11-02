@@ -88,6 +88,7 @@ def save_case(mode, data, record_id=None):
         check_revision(case, data.get("revision"), case_membership(case))
         if getattr(case, party_key(mode)+"_id") != account.pk:
             raise ValidationError("Create a new case to change the account.")
+    case._timeline_before_result=(case.reconciliation_status,case.total_discrepancy_amount)
     selected = {}
     for key, relation, target in [("orderIds", "purchase_orders", "purchase_order"), ("receiptIds", "delivery_receipts", "delivery_receipt"), ("invoiceIds", "sales_invoices", "sales_invoice")]:
         ids = data.get(key, [])
@@ -114,7 +115,11 @@ def save_case(mode, data, record_id=None):
     case.currency = data.get("currency")
     case.notes = data.get("notes", "")
     case.reconciliation_status = "pending"
+    creating=case.pk is None
     case.save()
+    if creating:
+        from discrepancies.services.timeline import record_transition
+        record_transition(case,'case_created','Reconciliation case created',case._meta.label,case.pk,{'currency':case.currency,'party_id':account.pk})
     for key, rows in selected.items():
         getattr(case, key).set(rows)
     case.refresh_reconciliation_status()
@@ -122,6 +127,7 @@ def save_case(mode, data, record_id=None):
 
 
 @transaction.atomic
+@defer_reconciliation()
 def save_allocations(mode, record_id, data):
     payment = get_object_or_404(model(mode, "payment"), pk=record_id)
     # Account lock serializes all allocations for this account before invoice locks.
@@ -150,6 +156,9 @@ def save_allocations(mode, record_id, data):
             payment=payment, invoice=invoice, cash_amount=row.get("cash", "0"),
             withholding_tax_amount=row.get("withholding", "0"), discount_amount=row.get("discount", "0"))
         allocation.save()  # Existing model validates account, currency and component limits.
+    from discrepancies.services.timeline import observe_invoice_cases
+    for linked_case in model(mode,'Transaction').objects.filter(sales_invoices__pk__in=old_ids | seen).distinct().order_by('pk'):
+        observe_invoice_cases(linked_case)
     for invoice in model(mode, "sales_invoice").objects.filter(pk__in=old_ids | seen):
         invoice.refresh_payment_status()
     return payment

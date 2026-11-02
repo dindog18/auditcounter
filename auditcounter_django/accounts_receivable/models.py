@@ -439,7 +439,10 @@ class CompanySalesInvoice(models.Model):
     def outstanding_balance(self) -> Decimal:
         return max(Decimal("0"), self.total_amount - self.settled_amount)
 
+    @transaction.atomic
     def refresh_payment_status(self):
+        from discrepancies.services.timeline import lock_account
+        lock_account(self)
         # Keep the stored payment status in step with cleared allocations.
         settled = self.settled_amount
         if settled >= self.total_amount > Decimal("0"):
@@ -450,6 +453,9 @@ class CompanySalesInvoice(models.Model):
             status = "unpaid"
         type(self).objects.filter(pk=self.pk).update(payment_status=status)
         self.payment_status = status
+        from discrepancies.services.timeline import observe_invoice_cases
+        for linked_case in self.reconciliation_cases.order_by("pk"):
+            observe_invoice_cases(linked_case)
 
     def __str__(self):
         return f"{self.invoice_reference_no} - {self.customer}"
@@ -585,13 +591,18 @@ class CustomerPayment(models.Model):
         services.validate_source(self)
         services.validate_payment_amounts(self)
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
+        from discrepancies.services.timeline import lock_account
+        lock_account(self)
         self.source_record_key = services.normalize_source_key(self.source_record_key)
         self.full_clean()
         with transaction.atomic():
             result = super().save(*args, **kwargs)
             for allocation in self.invoice_allocations.select_related("invoice"):
                 allocation.invoice.refresh_payment_status()
+            from discrepancies.services.timeline import observe_payment
+            observe_payment(self)
             return result
 
     @property
@@ -1065,6 +1076,8 @@ class PaymentAllocation(models.Model):
     def save(self, *args, **kwargs):
         # Lock the affected rows so concurrent matches or allocations cannot reuse them.
         with transaction.atomic():
+            from discrepancies.services.timeline import lock_account
+            if self.invoice_id:lock_account(self.invoice)
             if self.payment_id:
                 CustomerPayment.objects.select_for_update().get(pk=self.payment_id)
             if self.invoice_id:
@@ -1087,6 +1100,8 @@ class PaymentAllocation(models.Model):
     def delete(self, *args, **kwargs):
         invoice = self.invoice
         with transaction.atomic():
+            from discrepancies.services.timeline import lock_account
+            lock_account(invoice)
             result = super().delete(*args, **kwargs)
             invoice.refresh_payment_status()
             return result

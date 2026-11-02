@@ -57,7 +57,14 @@ def refresh_transaction(case):
     locked = type(case).objects.select_for_update().get(pk=case.pk)
     service = import_module(f'{case._meta.app_label}.services.reconciliation')
     evaluation = service.evaluate_reconciliation(locked)
+    from .timeline import record_transition,observe_case
+    old_status,old_amount=getattr(case,'_timeline_before_result',(locked.reconciliation_status,locked.total_discrepancy_amount))
+    if hasattr(case,'_timeline_before_result'):del case._timeline_before_result
     synchronize_findings(locked, evaluation['discrepancy_findings'])
+    if (old_status,old_amount)!=(evaluation['status'],evaluation['discrepancy']):
+        record_transition(locked,'reconciliation_changed','Reconciliation result changed',locked._meta.label,locked.pk,
+            {'status':evaluation['status'],'amount':evaluation['discrepancy']},before={'status':old_status,'amount':old_amount})
+    observe_case(locked)
     type(case).objects.filter(pk=case.pk).update(reconciliation_status=evaluation['status'], total_discrepancy_amount=evaluation['discrepancy'])
     case.reconciliation_status = evaluation['status']
     case.total_discrepancy_amount = evaluation['discrepancy']
@@ -85,9 +92,13 @@ def clear_resolved_findings(case, active_fingerprints):
     from ..models import DiscrepancyFinding
     type(case).objects.select_for_update().get(pk=case.pk)
     for finding in DiscrepancyFinding.objects.filter(**case_filter(case), status='open').exclude(fingerprint__in=active_fingerprints):
+        from .timeline import finding_state
+        previous=finding_state(finding)
         finding.status, finding.cleared_at = 'cleared', timezone.now()
         finding.save(update_fields=['status','cleared_at'])
         capture_finding_evidence(finding, current_evidence(case, finding))
+        from .timeline import finding_event
+        finding_event(case,finding,'finding_cleared',previous)
 
 
 @db_transaction.atomic
@@ -104,6 +115,8 @@ def synchronize_findings(case, findings):
         values = {field:item[field] for field in fields}
         finding, created = DiscrepancyFinding.objects.get_or_create(**case_filter(case), fingerprint=fingerprint,
             defaults={**values,'first_detected_at':now,'last_detected_at':now})
+        from .timeline import finding_state,finding_event
+        previous=finding_state(finding) if not created else None
         if not created:
             for field,value in values.items():
                 setattr(finding,field,value)
@@ -113,6 +126,8 @@ def synchronize_findings(case, findings):
         amount_field = finding._meta.get_field('difference_amount')
         finding.difference_amount = amount_field.to_python(finding.difference_amount)
         capture_finding_evidence(finding, item['evidence'])
+        if created or previous!=finding_state(finding):
+            finding_event(case,finding,'finding_detected' if created else 'finding_reopened' if previous['status']=='cleared' else 'finding_changed',previous)
     clear_resolved_findings(case, active)
     from .investigation import flag_changed_resolution
     flag_changed_resolution(case)

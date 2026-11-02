@@ -84,3 +84,8 @@ def serialize_case_summary(row):
     data['discrepancy_amount']=str(data['discrepancy_amount']) if data['discrepancy_amount'] is not None else None
     data['detail_url']=reverse(f"{'ACCOUNTS_PAYABLE' if module=='ap' else 'ACCOUNTS_RECEIVABLE'}:reconciliation_detail",args=[data['case_id']])
     return data
+
+
+def timeline_case_reference(case):
+    module='ap' if case._meta.app_label=='accounts_payable' else 'ar'
+    return dict(module=module,id=case.pk,reference=f'{module.upper()}-{case.pk}')
