@@ -1,4 +1,135 @@
-# Encoder (local MCP MVP)
+# Encoder — reviewed local MCP operations
+
+Owns the existing post-routing preparation and explicit MCP execution workspace.
+This is separate from read-only auditing, matching, discrepancy calculation and
+supplier/customer settlement. Encoder is disabled by default; no operation runs
+merely because a document was uploaded, routed, investigated or matched.
+
+## Application flow
+
+```mermaid
+flowchart TD
+    A[Enable local Encoder and configure MCP connection] --> B[Discover schemas and explicitly permit intended tool]
+    B --> C[Router creates document route and Encoder job]
+    C --> D[Load approved operation schema and reusable field mapping]
+    D --> E[Prepare local payload from saved extraction]
+    E --> F[Optional AI proposal / troubleshooting]
+    F --> G[Human applies proposal and inspects validation]
+    E --> G
+    G --> H{Source / route approval and payload ready?}
+    H -->|No| I[Retain local draft and errors]
+    H -->|Yes| J[Explicit current-revision confirmation]
+    J --> K[Invoke selected permitted MCP operation]
+    K --> L[Persist execution outcome and idempotency context]
+    L --> M{Outcome uncertain?}
+    M -->|Yes| N[Reconcile external state before retry]
+    M -->|No| O[Review saved result]
+    I --> P[Optional reset starts new cycle and preserves prior draft]
+    P --> D
+```
+
+## Model and application boundaries
+
+Connection/tool discovery and AI proposals do not execute a business tool. Prepared
+JSON, a ready job and a permitted tool do not replace the final confirmation. Existing
+external operations may write to their configured target only through the separate
+explicit execution workflow. The reconciliation features do not call that workflow
+or write to VANS V2. Reset and reversal of local drafts do not undo an external write.
+
+`EncoderJob.route` is one-to-one with an existing document route. `EncoderMapping`
+is reusable per connection/tool; executions, chat attempts and reset snapshots retain
+job/cycle provenance. Encrypted secrets reuse [Database extraction's key](../db_extraction/README.md).
+Use `CONFIG_ASSISTANT_*` for AI assistance, and the existing loopback-only access guard.
+No application login or new identity/permission system is required.
+
+## Verification
+
+```bash
+python auditcounter_django/manage.py test encoder --noinput
+```
+
+Tests use synthetic sources and mocked MCP/provider operations. Read the detailed
+existing setup, confirmation, retry and unknown-outcome instructions below before
+configuring any operation with external side effects.
+
+## Model ERD
+
+These logical diagrams reflect the current Django model definitions. Key fields are
+shown; external entities appear as primary-key stubs and include their app prefix.
+`||` means exactly one, `|o` / `o|` zero or one, and `o{` / `}o` zero or more.
+FK optionality is represented on the parent side; one-to-one/unique FKs limit children.
+Many-to-many lines represent Django-managed join tables; service validation may impose
+stronger business constraints than these structural cardinalities.
+
+### Application models
+
+```mermaid
+erDiagram
+    encoder_MCPConnection {
+        int id PK
+        string transport
+    }
+    encoder_EncoderMapping {
+        int id PK
+        int connection FK
+        string tool_name
+        json field_mappings
+        string idempotency_field
+    }
+    encoder_EncoderJob {
+        int id PK
+        int route FK
+        int connection FK
+        string status
+    }
+    encoder_EncoderExecution {
+        int id PK
+        int job FK
+        int connection FK
+        string status
+    }
+    encoder_EncoderChatMessage {
+        int id PK
+        int job FK
+        string status
+        string role
+        string decision
+    }
+    encoder_EncoderReset {
+        int id PK
+        int job FK
+        int cycle
+        json snapshot
+        datetime created_at
+    }
+    router_DocumentRoute {
+        int route_no PK
+    }
+    encoder_MCPConnection ||--o{ encoder_EncoderMapping : "connection"
+    router_DocumentRoute ||--o| encoder_EncoderJob : "route"
+    encoder_MCPConnection |o--o{ encoder_EncoderJob : "connection"
+    encoder_EncoderJob ||--o{ encoder_EncoderExecution : "job"
+    encoder_MCPConnection ||--o{ encoder_EncoderExecution : "connection"
+    encoder_EncoderJob ||--o{ encoder_EncoderChatMessage : "job"
+    encoder_EncoderJob ||--o{ encoder_EncoderReset : "job"
+```
+
+### Model responsibilities
+
+| Model | Responsibility |
+|---|---|
+| `MCPConnection` | Trusted operator-managed MCP launch/HTTP configuration, encrypted secrets and approved tools. |
+| `EncoderMapping` | Reusable field mapping for one connection/tool. |
+| `EncoderJob` | One routed document workspace with payload, schema, validation and numbered cycles. |
+| `EncoderExecution` | Immutable execution attempt/outcome and reconciliation context. |
+| `EncoderChatMessage` | Persisted AI preparation/troubleshooting attempt and metrics. |
+| `EncoderReset` | Historical draft snapshot before a new workspace cycle. |
+
+For every field, delete policy, conditional constraint and index, consult
+[`models.py`](models.py) and the additive [`migrations/`](migrations/). These diagrams
+do not imply that an unmigrated database already has the same schema.
+
+## Detailed operating guide
 
 Encoder prepares external business operations from **existing routed extraction
 text**. It does not upload files, run OCR, or change AP/AR extraction. Pages use

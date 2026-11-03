@@ -12,7 +12,7 @@ def source_url(evidence):
     else:
         app, _, _ = evidence.source_model.partition('.')
         record_id = evidence.source_record_id
-        resource = {'PO':'purchase_order','DR':'delivery_receipt','SI':'invoice'}.get(evidence.evidence_type)
+        resource = {'PO':'purchase_order','DR':'delivery_receipt','SI':'invoice','STATEMENT':'statement','DEDUCTION':'deduction'}.get(evidence.evidence_type)
     namespace = {'accounts_payable':'ACCOUNTS_PAYABLE','accounts_receivable':'ACCOUNTS_RECEIVABLE'}.get(app)
     if not namespace or not resource or not str(record_id).isdigit():
         return None
@@ -27,6 +27,7 @@ def source_url(evidence):
 
 def serialize_findings(case):
     from .services.investigation import finding_basis
+    from .services.analytics import serialize_root_cause
     output = []
     for finding in case.discrepancy_findings.prefetch_related('evidence').order_by('-status','first_detected_at','pk'):
         evidence = []
@@ -40,7 +41,7 @@ def serialize_findings(case):
                 sourceKey=item.source_record_key, provenance=item.provenance, field=item.field_name,
                 observed=item.observed_value, findingSnapshot=item.finding_snapshot, capturedAt=item.captured_at.isoformat()))
         output.append(dict(id=finding.pk, code=finding.finding_code, severity=finding.severity, status=finding.status,
-            reviewDecision=finding.review_decision,reviewNotes=finding.review_notes,
+            rootCause=serialize_root_cause(getattr(finding,'root_cause',None)),reviewDecision=finding.review_decision,reviewNotes=finding.review_notes,
             reviewedAt=finding.reviewed_at.isoformat() if finding.reviewed_at else None,
             reviewStale=finding.review_decision!='unreviewed' and finding.review_basis!=finding_basis(finding),
             summary=finding.summary, expected=finding.expected_value, actual=finding.actual_value,

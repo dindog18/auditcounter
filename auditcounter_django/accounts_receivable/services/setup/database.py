@@ -136,6 +136,9 @@ def validate_query(mode, record, query, complete=False):
             validate_reference(sort.get('column'), columns)
     if type(query.get('distinct', False)) is not bool:
         raise ValidationError('Choose whether duplicate output rows should be removed.')
+    if complete:
+        from db_extraction.services.schema_comparison import require_current_schema
+        require_current_schema(tables.values())
     return {'tables': tables, 'columns': columns, 'source': source, 'keys': keys}
 
 
@@ -405,6 +408,12 @@ def test(mode, record, limit):
     if type(limit) is not int or limit not in {5, 10, 25}:
         raise ValidationError('Preview 5, 10, or 25 records.')
     query = record.setup_data['database']
+    from db_extraction.services.schema_comparison import configuration_issues
+    from .data_quality import summary
+    schema_issues = configuration_issues(record)
+    if schema_issues:
+        return {'quality': summary(schema_issues), 'passed': False, 'issues': [item['explanation'] for item in schema_issues],
+                'count': 0, 'has_more': False, 'duplicateCount': 0, 'rows': [], 'rawRows': [], 'headers': [], 'sourceHeaders': []}
     metadata = validate_query(mode, record, query, complete=True)
     iterator = stream_records(mode, record, include_raw=True)
     try:
@@ -412,6 +421,8 @@ def test(mode, record, limit):
     finally:
         iterator.close()
     shown, issues = preview[:limit], []
+    from .data_quality import validate_record, summary
+    quality = summary([item for _, output, _ in shown for item in validate_record(mode, record, output)])
     for key, output, raw in shown:
         issues.extend('Source '+json.dumps(key, cls=DjangoJSONEncoder)+': '+message for message in clean_output(mode, record, output))
     if not shown:
@@ -420,7 +431,8 @@ def test(mode, record, limit):
     source_headers = ([column for column in metadata['output_columns'] if column['id'] in raw_columns]
                       if metadata.get('pipeline') else
                       [{'id': ref, 'label': str(metadata['tables'][ref.split('.', 1)[0]])+'.'+ref.split('.', 1)[1]} for ref in raw_columns])
-    return {'passed': not issues, 'issues': list(dict.fromkeys(issues)), 'count': len(shown), 'has_more': len(preview)>limit, 'duplicateCount': 0,
+    issues.extend(item['explanation'] for item in quality['issues'] if item['blocking'])
+    return {'quality': quality, 'passed': not issues, 'issues': list(dict.fromkeys(issues)), 'count': len(shown), 'has_more': len(preview)>limit, 'duplicateCount': 0,
             'rows': [{**{'header:'+key:value for key,value in output['record'].items()}, **{'line:'+key:value for key,value in line.items()}} for _, output, _ in shown for line in (output['lines'] or [{}])][:100],
             'rawRows': [row for _, _, raw in shown for row in raw[:1]],
             'headers': [{'id': item['id'], 'label': next(field['label'] for field in field_catalog(mode, record.target_entity) if field['id'] == item['id'])} for item in query['mappings'] if item['include']],

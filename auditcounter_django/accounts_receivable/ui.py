@@ -57,7 +57,8 @@ def configuration_catalog(mode):
 def workspace_patterns(view, party_slug, api):
     """Keep AR/AP route names parallel while using customer/supplier URLs."""
     patterns = [path("api/<str:action>/", api, name="api"), path("api/<str:action>/<int:record_id>/", api, name="api_record"), path("", view, name="overview"), path("aging/", view, {"resource": "aging"}, name="aging")]
-    for resource, name, _label, _icon in RESOURCES:
+    resources = list(RESOURCES) + ([('credits','credit','Supplier credits','file-invoice-dollar'),('statements','statement','Supplier statements','list')] if party_slug=='suppliers' else [('deductions','deduction','Customer deductions','file-invoice-dollar')])
+    for resource, name, _label, _icon in resources:
         slug = party_slug if resource == "parties" else resource
         patterns.extend([
             path(f"{slug}/", view, {"resource": resource}, name=f"{name}_list"),
@@ -88,6 +89,12 @@ def render_workspace(request, mode, resource="overview", screen="list", record_i
     navigation = [{"key": "overview", "label": "Overview", "icon": "chart-pie", "url": reverse(f"{namespace}:overview")}]
     for key, name, label, icon in RESOURCES:
         navigation.append({"key": key, "label": party + "s" if key == "parties" else label, "icon": icon, "url": reverse(f"{namespace}:{name}_list")})
+    if not receivable:
+        navigation.append({'key':'credits','label':'Supplier credits','icon':'file-invoice-dollar','url':reverse(f'{namespace}:credit_list')})
+    if not receivable:
+        navigation.append({'key':'statements','label':'Supplier statements','icon':'list','url':reverse(f'{namespace}:statement_list')})
+    if receivable:
+        navigation.append({'key':'deductions','label':'Customer deductions','icon':'file-invoice-dollar','url':reverse(f'{namespace}:deduction_list')})
     navigation.append({"key": "aging", "label": "Aging report", "icon": "clock", "url": reverse(f"{namespace}:aging")})
     navigation.append({"key": "configuration", "label": "Extraction setup", "icon": "sliders-h", "url": reverse(f"{namespace}:configuration_list")})
     navigation.append({"key": "llm-logs", "label": "LLM activity", "icon": "history", "url": reverse(f"{namespace}:llm_log_list")})
@@ -108,7 +115,7 @@ def render_workspace(request, mode, resource="overview", screen="list", record_i
     if resource == "configuration":
         config["configurationCatalog"] = configuration_catalog(mode)
     if record_id is not None:
-        target = {"parties": party_key(mode), "reconciliation": "Transaction", "configuration": "ExtractionConfiguration", "llm-logs": "LLMExtractionLog", **RECORD_RESOURCES}[resource]
+        target = {"parties": party_key(mode), "reconciliation": "Transaction", "configuration": "ExtractionConfiguration", "llm-logs": "LLMExtractionLog", "credits":"SupplierCreditNote", "statements":"SupplierStatement", "deductions":"CustomerDeduction", **RECORD_RESOURCES}[resource]
         get_object_or_404(model(mode, target), pk=record_id)
     return render(request, "accounting/setup.html" if screen == "configuration" else "accounting/workspace.html", {
         "finance_state": pages.workspace_state(mode, resource, record_id=record_id, screen=screen),

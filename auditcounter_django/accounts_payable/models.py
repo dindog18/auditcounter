@@ -429,8 +429,10 @@ class SupplierSalesInvoice(models.Model):
 
     def save(self, *args, **kwargs):
         self.source_record_key = services.normalize_source_key(self.source_record_key)
-        self.full_clean()
         with transaction.atomic():
+            from discrepancies.services.timeline import lock_account
+            lock_account(self)
+            self.full_clean()
             result = super().save(*args, **kwargs)
             services.refresh_document_cases(self)
             return result
@@ -607,6 +609,8 @@ class CompanyPayment(models.Model):
                 allocation.invoice.refresh_payment_status()
             from discrepancies.services.timeline import observe_payment
             observe_payment(self)
+            from .services.statements import refresh_related
+            refresh_related(self)
             return result
 
     @property
@@ -1329,3 +1333,215 @@ class DatabaseImportRun(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class CreditHistoryQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError('Use the reviewed credit service; financial history cannot be bulk rewritten.')
+
+    def delete(self):
+        raise ValidationError('Credit history cannot be deleted.')
+
+
+class SupplierCreditNote(models.Model):
+    """A supplier correction, distinct from cash and requiring explicit verification."""
+    objects = CreditHistoryQuerySet.as_manager()
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='credit_notes')
+    reference = models.CharField(max_length=100)
+    issue_date = models.DateField()
+    currency = models.CharField(max_length=3, validators=[RegexValidator(r'^[A-Z]{3}$')])
+    credit_amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('.01'))])
+    status = models.CharField(max_length=12, choices=[('draft','Draft'),('verified','Verified'),('cancelled','Cancelled')], default='draft')
+    source_document = models.ForeignKey('document_extraction.Document', null=True, blank=True, on_delete=models.PROTECT, related_name='supplier_credits')
+    source_database = models.ForeignKey('db_extraction.DatabaseSource', null=True, blank=True, on_delete=models.PROTECT, related_name='supplier_credits')
+    source_table = models.ForeignKey('db_extraction.DatabaseTable', null=True, blank=True, on_delete=models.PROTECT, related_name='supplier_credits')
+    source_record_key = models.JSONField(default=dict, blank=True)
+    verification_notes = models.TextField(blank=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['supplier','reference'], name='ap_credit_supplier_ref'),
+            models.UniqueConstraint(fields=['source_table','source_record_key'], condition=Q(source_table__isnull=False), name='ap_credit_source_key'),
+            models.CheckConstraint(condition=Q(credit_amount__gt=0), name='ap_credit_positive')]
+        ordering = ['-issue_date','-pk']
+
+    def clean(self):
+        super().clean()
+        services.validate_source(self)
+        if self.status=='verified' and (not self.verified_at or not self.verification_notes.strip() or not (self.source_document_id or self.source_database_id and self.source_record_key)):
+            raise ValidationError('Credit verification requires supporting evidence, notes and a verification timestamp.')
+        if self.pk:
+            old = type(self).objects.get(pk=self.pk)
+            if old.status=='verified' and any(getattr(old, name)!=getattr(self, name) for name in ('supplier_id','reference','currency','credit_amount','issue_date','source_document_id','source_database_id','source_table_id','source_record_key','status','verified_at','verification_notes')):
+                raise ValidationError('Verified credit evidence cannot be rewritten. Reverse applications and record a corrective document.')
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            Supplier.objects.select_for_update().get(pk=self.supplier_id)
+            self.full_clean()
+            result = super().save(*args, **kwargs)
+            from .services.statements import refresh_related
+            refresh_related(self)
+            return result
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Preserve credit history; credits cannot be deleted.')
+
+
+class SupplierCreditApplication(models.Model):
+    objects = CreditHistoryQuerySet.as_manager()
+    credit = models.ForeignKey(SupplierCreditNote, on_delete=models.PROTECT, related_name='applications')
+    invoice = models.ForeignKey(SupplierSalesInvoice, on_delete=models.PROTECT, related_name='credit_applications')
+    amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('.01'))])
+    request_key = models.CharField(max_length=100)
+    application_date = models.DateField()
+    notes = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['credit','request_key'], name='ap_credit_request_key'),
+                       models.CheckConstraint(condition=Q(amount__gt=0), name='ap_credit_application_positive')]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError('Credit applications are immutable; use a reversal.')
+        from .services.credits import validate_application
+        with transaction.atomic():
+            Supplier.objects.select_for_update().get(pk=self.credit.supplier_id)
+            self.credit = SupplierCreditNote.objects.select_for_update().get(pk=self.credit_id)
+            self.invoice = SupplierSalesInvoice.objects.select_for_update().get(pk=self.invoice_id)
+            self.full_clean()
+            validate_application(self)
+            result = super().save(*args, **kwargs)
+            self.invoice.refresh_payment_status()
+            return result
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Credit applications are immutable; use a reversal.')
+
+
+class SupplierCreditReversal(models.Model):
+    objects = CreditHistoryQuerySet.as_manager()
+    application = models.OneToOneField(SupplierCreditApplication, on_delete=models.PROTECT, related_name='reversal')
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError('Credit reversals are immutable.')
+        with transaction.atomic():
+            Supplier.objects.select_for_update().get(pk=self.application.credit.supplier_id)
+            self.full_clean()
+            result = super().save(*args, **kwargs)
+            self.application.invoice.refresh_payment_status()
+            return result
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Credit reversals are immutable.')
+
+
+class SupplierStatement(models.Model):
+    objects = CreditHistoryQuerySet.as_manager()
+    supplier = models.ForeignKey(Supplier,on_delete=models.PROTECT,related_name='statements')
+    reference = models.CharField(max_length=100)
+    statement_date = models.DateField()
+    period_start = models.DateField()
+    currency = models.CharField(max_length=3,validators=[RegexValidator(r'^[A-Z]{3}$')])
+    opening_balance = models.DecimalField(max_digits=15,decimal_places=2)
+    closing_balance = models.DecimalField(max_digits=15,decimal_places=2)
+    source_document = models.ForeignKey('document_extraction.Document',on_delete=models.PROTECT,related_name='supplier_statements')
+    ap_transaction = models.ForeignKey(Transaction,null=True,blank=True,on_delete=models.PROTECT,related_name='supplier_statements')
+    reconciliation_status = models.CharField(max_length=12,default='pending',choices=[('pending','Pending'),('matched','Matched'),('exception','Exception')])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['supplier','reference'],name='ap_statement_reference')]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            old = type(self).objects.get(pk=self.pk)
+            if any(getattr(old, field) != getattr(self, field) for field in ('supplier_id', 'reference', 'statement_date', 'period_start', 'currency', 'opening_balance', 'closing_balance', 'source_document_id', 'ap_transaction_id')):
+                raise ValidationError('Original statement evidence cannot be rewritten; import a corrective statement.')
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Preserve statement evidence and review history.')
+
+
+class SupplierStatementLine(models.Model):
+    statement = models.ForeignKey(SupplierStatement,on_delete=models.PROTECT,related_name='lines')
+    line_no = models.PositiveIntegerField()
+    reference = models.CharField(max_length=100)
+    transaction_date = models.DateField()
+    kind = models.CharField(max_length=10,choices=[('invoice','Invoice'),('payment','Payment'),('credit','Credit')])
+    amount = models.DecimalField(max_digits=15,decimal_places=2)
+    review_decision = models.CharField(max_length=20,default='unreviewed',choices=[('unreviewed','Unreviewed'),('confirmed','Confirmed'),('dismissed','Dismissed')])
+    review_notes = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True,blank=True)
+    objects = CreditHistoryQuerySet.as_manager()
+
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['statement','line_no'],name='ap_statement_line_no'),models.CheckConstraint(condition=Q(amount__gt=0),name='ap_statement_line_positive')]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            old = type(self).objects.get(pk=self.pk)
+            if any(getattr(old, field) != getattr(self, field) for field in ('statement_id', 'line_no', 'reference', 'transaction_date', 'kind', 'amount')):
+                raise ValidationError('Original statement evidence cannot be rewritten; import a corrective statement.')
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Preserve statement evidence and review history.')
+
+
+class SupplierStatementMatch(models.Model):
+    objects = CreditHistoryQuerySet.as_manager()
+    statement = models.ForeignKey(SupplierStatement,on_delete=models.PROTECT,related_name='matches')
+    line = models.ForeignKey(SupplierStatementLine,on_delete=models.PROTECT,related_name='matches')
+    invoice = models.ForeignKey(SupplierSalesInvoice,null=True,blank=True,on_delete=models.PROTECT,related_name='statement_matches')
+    payment = models.ForeignKey(CompanyPayment,null=True,blank=True,on_delete=models.PROTECT,related_name='statement_matches')
+    credit = models.ForeignKey(SupplierCreditNote,null=True,blank=True,on_delete=models.PROTECT,related_name='statement_matches')
+    active = models.BooleanField(default=True)
+    notes = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    superseded_at = models.DateTimeField(null=True,blank=True)
+
+    class Meta:
+        constraints=[models.CheckConstraint(condition=(Q(invoice__isnull=False,payment__isnull=True,credit__isnull=True)|Q(invoice__isnull=True,payment__isnull=False,credit__isnull=True)|Q(invoice__isnull=True,payment__isnull=True,credit__isnull=False)),name='statement_match_one_target'),
+            models.UniqueConstraint(fields=['line'],condition=Q(active=True),name='statement_line_active_match'),
+            *[models.UniqueConstraint(fields=['statement',kind],condition=Q(active=True,**{kind+'__isnull':False}),name='statement_active_'+kind) for kind in ('invoice','payment','credit')]]
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        if self.line.statement_id != self.statement_id:
+            raise ValidationError('A statement match must reference a line on that statement.')
+        target = getattr(self, self.line.kind)
+        if target is None or target.supplier_id != self.statement.supplier_id or target.currency != self.statement.currency:
+            raise ValidationError('Match type, supplier and currency must agree with the statement.')
+        if not self._state.adding:
+            old = type(self).objects.get(pk=self.pk)
+            if any(getattr(old, name) != getattr(self, name) for name in ('statement_id','line_id','invoice_id','payment_id','credit_id','notes')) or not old.active or self.active or not self.superseded_at:
+                raise ValidationError('Statement matches may only be explicitly superseded.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Preserve statement matching history.')
+
+
+class SupplierStatementEvaluation(models.Model):
+    statement = models.ForeignKey(SupplierStatement,on_delete=models.PROTECT,related_name='evaluations')
+    result = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = CreditHistoryQuerySet.as_manager()
+
+    def save(self,*args,**kwargs):
+        if not self._state.adding:raise ValidationError('Statement observations are append-only.')
+        return super().save(*args,**kwargs)
+
+    def delete(self,*args,**kwargs):
+        raise ValidationError('Statement observations cannot be deleted.')

@@ -18,7 +18,7 @@ for(const mode of ['ap','ar']) for(const resource of ['purchase-orders','invoice
     let click, confirmed=false;
     const calls=[];
     const errorBox={hidden:true,focus(){},scrollIntoView(){}};
-    const root={innerHTML:'',insertAdjacentHTML(_,html){this.innerHTML+=html;},querySelector(){return {addEventListener(_,handler){click=handler;}};}};
+    const root={innerHTML:'',insertAdjacentHTML(_,html){this.innerHTML+=html;},querySelector(selector){return {addEventListener(_,handler){if(selector==='#delete-record')click=handler;}};}};
     const location={search:'',href:'http://localhost'+base};
     vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/accounting/workspace.js'),'utf8'),{
       window:{confirm:()=>confirmed,BizmaticAccounting:{state,post:async(...args)=>{calls.push(args);return {deleted:true};}}},

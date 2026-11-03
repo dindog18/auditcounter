@@ -60,11 +60,13 @@ def refresh_transaction(case):
     from .timeline import record_transition,observe_case
     old_status,old_amount=getattr(case,'_timeline_before_result',(locked.reconciliation_status,locked.total_discrepancy_amount))
     if hasattr(case,'_timeline_before_result'):del case._timeline_before_result
-    synchronize_findings(locked, evaluation['discrepancy_findings'])
+    synchronize_findings(locked, evaluate_findings(locked, evaluation))
     if (old_status,old_amount)!=(evaluation['status'],evaluation['discrepancy']):
         record_transition(locked,'reconciliation_changed','Reconciliation result changed',locked._meta.label,locked.pk,
             {'status':evaluation['status'],'amount':evaluation['discrepancy']},before={'status':old_status,'amount':old_amount})
     observe_case(locked)
+    from .claims import flag_changed_claim_resolutions
+    flag_changed_claim_resolutions(locked)
     type(case).objects.filter(pk=case.pk).update(reconciliation_status=evaluation['status'], total_discrepancy_amount=evaluation['discrepancy'])
     case.reconciliation_status = evaluation['status']
     case.total_discrepancy_amount = evaluation['discrepancy']
@@ -131,6 +133,8 @@ def synchronize_findings(case, findings):
     clear_resolved_findings(case, active)
     from .investigation import flag_changed_resolution
     flag_changed_resolution(case)
+    from .analytics import flag_stale_causes
+    flag_stale_causes(case)
 
 
 def current_evidence(case, finding):
@@ -155,7 +159,17 @@ def current_evidence(case, finding):
             if document is None:
                 continue  # Original identifiers/values remain in the historical snapshot.
             line = document.lines.filter(pk=item.source_line_id).first() if item.source_line_id else None
-            captured.append(source_evidence(document,line))
+            if item.field_name == 'deduction':
+                from accounts_receivable.services.deductions import deduction_evidence
+                captured.append(deduction_evidence(document))
+            elif item.field_name == 'statement':
+                from accounts_payable.services.statements import statement_evidence
+                captured.append(statement_evidence(document))
+            elif item.field_name == 'settlement':
+                from accounts_receivable.services.settlement import settlement_evidence
+                captured.append(settlement_evidence(document))
+            else:
+                captured.append(source_evidence(document,line))
     if finding.finding_code in ('MISSING_PO','MISSING_DR'):
         relation = case.purchase_orders if finding.finding_code == 'MISSING_PO' else case.delivery_receipts
         for document in relation.all():
@@ -164,3 +178,15 @@ def current_evidence(case, finding):
     if invoice_line_id:
         captured.extend(allocation_evidence(match) for match in case.line_matches.filter(invoice_line_id=invoice_line_id))
     return captured
+
+
+def evaluate_findings(case, evaluation=None):
+    """Pure combined finding evaluation used by refresh and investigation validation."""
+    if evaluation is None:
+        service=import_module(f'{case._meta.app_label}.services.reconciliation')
+        evaluation=service.evaluate_reconciliation(case)
+    from accounts_receivable.services.settlement import evaluate_case
+    from accounts_receivable.services.deductions import case_findings as deductions
+    from accounts_payable.services.statements import case_findings as statements
+    from .duplicate_invoices import case_findings as duplicates
+    return [*evaluation['discrepancy_findings'], *evaluate_case(case)['findings'], *duplicates(case), *statements(case), *deductions(case)]

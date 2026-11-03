@@ -43,6 +43,8 @@ def read_rows(config, limit, offset):
     if config.setup_data.get("database"):
         from .setup.database import import_rows
         return import_rows("ar" if config._meta.app_label == "accounts_receivable" else "ap", config, limit, offset)
+    from db_extraction.services.schema_comparison import require_current_schema
+    require_current_schema([table for table in (config.source_table, config.line_source_table) if table])
     source = config.database_source
     if not source.enabled:
         raise ValidationError("Enable the database connection before importing.")

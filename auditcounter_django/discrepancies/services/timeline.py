@@ -9,7 +9,7 @@ from ..models import CaseTimelineEvent,CaseActivity,DiscrepancyFinding
 from ..evaluation import json_value,source_evidence
 from . import case_filter,digest
 
-CATEGORIES={'case_created':'documents','documents_changed':'documents','source_changed':'documents','matches_changed':'matching','payments_changed':'payments','reconciliation_changed':'discrepancies'}
+CATEGORIES={'case_created':'documents','documents_changed':'documents','source_changed':'documents','matches_changed':'matching','payments_changed':'payments','credits_changed':'payments','duplicate_reviewed':'investigations','claim_changed':'investigations','claim_correspondence':'investigations','statement_changed':'payments','deductions_changed':'payments','reconciliation_changed':'discrepancies'}
 CATEGORIES.update({key:'discrepancies' for key in ('finding_detected','finding_changed','finding_cleared','finding_reopened')})
 
 @transaction.atomic
@@ -69,6 +69,23 @@ def observe_case(case):
                 if line:observed['observed_value']['line']['description']=line.description[:2000]
                 else:observed['observed_value']['line_numbers']=list(document.lines.order_by('line_no').values_list('line_no',flat=True))
                 record_transition(case,'source_changed','Accounting source evidence observed',document._meta.label,f'{document.pk}:{line.pk if line else "header"}',{'values':observed['observed_value'],'document_id':document.source_document_id,'database_id':document.source_database_id})
+    if case._meta.app_label=='accounts_payable':
+        credits=[]
+        for invoice in case.sales_invoices.order_by('pk'):
+            for application in invoice.credit_applications.select_related('credit','reversal').order_by('pk'):
+                credit=application.credit
+                credits.append(dict(id=application.pk,invoice_id=invoice.pk,credit_id=credit.pk,reference=credit.reference,
+                    amount=application.amount,currency=credit.currency,date=application.application_date,status=credit.status,
+                    verification_notes=credit.verification_notes,verified_at=credit.verified_at,source_document_id=credit.source_document_id,
+                    reversed=hasattr(application,'reversal'),reversal_reason=application.reversal.reason if hasattr(application,'reversal') else ''))
+        if credits or case.timeline_events.filter(event_type='credits_changed').exists():
+            record_transition(case,'credits_changed','Supplier credit application and reversal evidence observed',case._meta.label,case.pk,{'applications':credits})
+    if case._meta.app_label=='accounts_receivable':
+        from accounts_receivable.models import CustomerDeduction
+        from accounts_receivable.services.deductions import snapshot
+        deductions=[dict(id=row.pk, **snapshot(row)) for row in CustomerDeduction.objects.filter(invoice__in=case.sales_invoices.all()).order_by('pk')]
+        if deductions or case.timeline_events.filter(event_type='deductions_changed').exists():
+            record_transition(case,'deductions_changed','Customer deduction review and application evidence observed',case._meta.label,case.pk,{'deductions':deductions})
     payments=[]
     for invoice in case.sales_invoices.order_by('pk'):
         for allocation in invoice.payment_allocations.select_related('payment').order_by('payment_id'):
@@ -89,7 +106,7 @@ def observe_invoice_cases(case):
     from . import _pending
     pending=_pending.get()
     if pending is not None:pending[(case._meta.label,case.pk)]=case
-    else:observe_case(case)
+    else:case.refresh_reconciliation_status()
 
 
 def finding_state(finding):

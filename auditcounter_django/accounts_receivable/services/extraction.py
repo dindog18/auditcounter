@@ -159,6 +159,9 @@ def save_result(mode, config, parsed, log=None, route=None, database_source=None
         raise ValidationError("Expected record, lines, and issues in the extraction output.")
     if parsed.get("issues"):
         raise ValidationError("Extraction needs review: " + "; ".join(str(issue) for issue in parsed["issues"]))
+    if database_source:
+        from .setup.data_quality import require_valid
+        require_valid(mode, config, parsed)
     target = config.target_entity
     Record = model(mode, target)
     values = values_for(mode, config, parsed.get("record"), canonical=route is not None)
@@ -206,6 +209,9 @@ def save_result(mode, config, parsed, log=None, route=None, database_source=None
     validate_totals(target, record, line_records, header_values=parsed['record'], line_values=line_rows)
     for line in line_records:
         line.save()
+    if target=='sales_invoice':
+        from discrepancies.services.duplicate_invoices import detect
+        detect(record)
     if log:
         setattr(log, target, record)
         log.status = "completed"

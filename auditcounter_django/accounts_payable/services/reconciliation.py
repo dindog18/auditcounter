@@ -43,6 +43,9 @@ def normalize_source_key(key):
 
 def refresh_document_cases(document: CaseDocument) -> None:
     # Changing a source document can invalidate an existing match.
+    if hasattr(document,'invoice_reference_no'):
+        from .statements import refresh_related
+        refresh_related(document)
     for case in document.reconciliation_cases.all():
         case.refresh_reconciliation_status()
 
@@ -50,6 +53,10 @@ def refresh_document_cases(document: CaseDocument) -> None:
 def validate_source(record: SourceRecord) -> None:
     """Ensure the database table and extraction logs belong to the chosen sources."""
     errors = {}
+    if record.pk and hasattr(record,'statement_matches') and record.statement_matches.filter(active=True).exists():
+        old=type(record).objects.get(pk=record.pk)
+        if old.supplier_id!=record.supplier_id:
+            raise ValidationError('Preserve the supplier identity of statement evidence; record a correction separately.')
     if record.source_table_id:
         if (
             not record.source_database_id
@@ -68,7 +75,7 @@ def validate_source(record: SourceRecord) -> None:
         ):
             errors["source_record_key"] = "This source record was imported already."
     for field in ("source_llm_log", "source_text_log"):
-        log = getattr(record, field)
+        log = getattr(record, field, None)
         if log and (
             not record.source_document_id or log.fk_document_no_id != record.source_document_id
         ):
@@ -235,6 +242,7 @@ def validate_allocation(allocation: PaymentAllocation) -> None:
         used = others.aggregate(total=Sum(field))["total"] or ZERO
         if used + getattr(allocation, field) > limit:
             errors[field] = "Allocated amount exceeds the payment amount."
+    from .credits import applied_credit
     invoice_others = (
         type(allocation)
         .objects.filter(invoice=invoice)
@@ -248,7 +256,7 @@ def validate_allocation(allocation: PaymentAllocation) -> None:
         )
     )
     if (
-        allocated
+        allocated + applied_credit(invoice)
         + allocation.cash_amount
         + allocation.withholding_tax_amount
         + allocation.discount_amount
@@ -262,6 +270,9 @@ def validate_allocation(allocation: PaymentAllocation) -> None:
 def validate_invoice_allocations(invoice: SupplierSalesInvoice) -> None:
     """Prevent reducing an invoice below the amounts already allocated to it."""
     if invoice.pk:
+        for credit_application in invoice.credit_applications.select_related('credit').filter(reversal__isnull=True):
+            if credit_application.credit.supplier_id!=invoice.supplier_id or credit_application.credit.currency!=invoice.currency or invoice.invoice_status not in ('posted','disputed'):
+                raise ValidationError('Reverse credit applications before changing invoice party, currency, or posting state.')
         allocations = invoice.payment_allocations.exclude(payment__payment_status="reversed")
         allocated = sum(
             (
@@ -270,13 +281,15 @@ def validate_invoice_allocations(invoice: SupplierSalesInvoice) -> None:
             ),
             ZERO,
         )
-        if allocated > invoice.total_amount:
+        from .credits import applied_credit
+        if allocated + applied_credit(invoice) > invoice.total_amount:
             raise ValidationError({"total_amount": "Invoice total is below its allocations."})
 
 
 def settled_amount(invoice: SupplierSalesInvoice) -> Decimal:
     """Total the cash, withholding tax, and discounts from cleared payments."""
-    return sum(
+    from .credits import applied_credit
+    return applied_credit(invoice) + sum(
         (
             allocation.cash_amount + allocation.withholding_tax_amount + allocation.discount_amount
             for allocation in invoice.payment_allocations.select_related("payment")
@@ -290,6 +303,10 @@ def validate_payment_amounts(payment: CompanyPayment) -> None:
     """Prevent reducing payment amounts below their existing allocations."""
     if not payment.pk:
         return
+    if payment.payment_status != 'reversed':
+        for allocation in payment.invoice_allocations.select_related('invoice'):
+            allocation.payment = payment
+            validate_allocation(allocation)
     for allocation_field, payment_field in (
         ("cash_amount", "amount_paid"),
         ("withholding_tax_amount", "withholding_tax_amount"),
@@ -322,6 +339,9 @@ def calculate_reconciliation(case: Transaction) -> tuple[str, Decimal]:
 
 def validate_case(case: Transaction) -> None:
     """Prevent manually marking an incomplete or discrepant case as matched."""
+    if case.pk:
+        if case.supplier_claims.exclude(supplier_id=case.supplier_id,currency=case.currency).exists() or case.supplier_statements.exclude(supplier_id=case.supplier_id,currency=case.currency).exists():
+            raise ValidationError('Preserve the case account and currency referenced by claims and statements.')
     if (
         case.pk
         and case.reconciliation_status == "matched"

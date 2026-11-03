@@ -284,6 +284,9 @@ def chat(mode, data, record_id=None):
                'setup_requirements': {'parameters': requirements['parameters'], 'features': requirements['features']},
                'editable_fields': [name for name in configuration.EDITABLE if name not in {'target_entity', 'source_type'} and name not in (DATABASE_FIELDS if record.source_type == 'document' else DOCUMENT_FIELDS)] + [key], **available,
                'accounts': list(model(mode, key).objects.filter(is_active=True).values('pk', key+'_code', key+'_name')[:100])}
+    if record.source_type == 'database':
+        from db_extraction.services.schema_comparison import configuration_issues
+        context['quality_issues'] = configuration_issues(record)[:200]
     # At most one context read and one format repair; every call uses CONFIG_ASSISTANT_*.
     logger.info('Configuration chat started: module=%s configuration=%s', mode, record_id)
     tool_used = repaired = False

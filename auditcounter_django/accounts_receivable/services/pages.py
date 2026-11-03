@@ -13,6 +13,8 @@ from .amounts import line_amount_issues
 from .catalog import model, party_key, RESOURCES, revision
 from .configuration import snapshot
 from .records import allocations, case_membership, matches
+from .settlement import evaluate_case
+from discrepancies.services.claims import serialize as serialize_claim
 
 
 def number(value):
@@ -75,6 +77,8 @@ def document(row, target, mode):
     if target == "sales_invoice":
         result["settled"] = number(row.settled_amount)
         result["balance"] = number(row.outstanding_balance)
+        from .settlement import evaluate_invoice
+        result["settlement"] = evaluate_invoice(row)
     return result
 
 
@@ -102,6 +106,35 @@ def llm_log(row):
 
 def workspace_state(mode, resource, record_id=None, screen=None):
     state = {"parties": [party(row, mode) for row in model(mode, party_key(mode)).objects.all()], "today": timezone.localdate().isoformat()}
+    if resource == 'deductions' and mode=='ar':
+        from accounts_receivable.models import CustomerDeduction
+        from .deductions import serialize
+        from document_extraction.models import Document
+        rows=CustomerDeduction.objects.filter(pk=record_id) if record_id else CustomerDeduction.objects.order_by('-pk')[:500]
+        state['deductions']=[serialize(row) for row in rows]
+        state['invoices']=[dict(id=row.pk,reference=row.invoice_reference_no,currency=row.currency,balance=str(row.outstanding_balance),revision=revision(row)) for row in model(mode,'sales_invoice').objects.filter(invoice_status__in=['posted','disputed']).order_by('-pk')[:1000]]
+        state['documents']=list(Document.objects.order_by('-pk').values('pk','file_name')[:200])
+        return state
+    if resource == 'statements' and mode=='ap':
+        from accounts_payable.models import SupplierStatement
+        from accounts_payable.services.statements import serialize
+        from document_extraction.models import Document
+        rows=SupplierStatement.objects.filter(pk=record_id) if record_id else SupplierStatement.objects.order_by('-pk')[:500]
+        state['statements']=[serialize(row) for row in rows]
+        state['documents']=list(Document.objects.order_by('-pk').values('pk','file_name')[:200])
+        state['cases']=list(model(mode,'Transaction').objects.order_by('-pk').values('pk','supplier_id','currency')[:500])
+        return state
+    if resource == 'credits' and mode=='ap':
+        from accounts_payable.models import SupplierCreditNote
+        from accounts_payable.services.credits import serialize_credit
+        from document_extraction.models import Document
+        state['credits'] = [serialize_credit(row) for row in SupplierCreditNote.objects.all()[:500]]
+        state['invoices'] = [dict(id=row.pk,reference=row.invoice_reference_no,supplier_id=row.supplier_id,currency=row.currency,
+            balance=str(row.outstanding_balance)) for row in model(mode,'sales_invoice').objects.filter(invoice_status__in=['posted','disputed']).order_by('-pk')[:1000]]
+        state['documents'] = list(Document.objects.order_by('-pk').values('pk','file_name')[:200])
+        if record_id and not any(row['id']==record_id for row in state['credits']):
+            state['credits'].append(serialize_credit(SupplierCreditNote.objects.get(pk=record_id)))
+        return state
     if resource == "configuration":
         from document_extraction.models import DocExtractionLog
         state["sample_documents"] = list(DocExtractionLog.objects.exclude(markdown_text="").order_by("-pk").values("pk", "fk_document_no__file_name")[:50])
@@ -150,5 +183,5 @@ def workspace_state(mode, resource, record_id=None, screen=None):
             from sku_matching.services.presentation import workspace_state as sku_workspace
             sku_state = sku_workspace(row)
         # Recheck old saved cases on read without rewriting source records or cached decisions.
-        state["reconciliation"].append({"id": row.pk, "reference": f"{mode.upper()}-{row.pk}", "partyId": getattr(row, party_key(mode)+"_id"), "date": text_date(row.transaction_date), "currency": row.currency, "notes": row.notes, "status": status, "discrepancy": number(discrepancy) if discrepancy is not None else None, "calculationIssue": calculation_issue, "evaluation": evaluation, "findings": serialize_findings(row), "investigation": investigation, "investigationRevision": investigation_revision, "sku": sku_state, "reconciledAt": text_date(row.reconciled_at), "orderIds": membership["purchase_orders"], "receiptIds": membership["delivery_receipts"], "invoiceIds": membership["sales_invoices"], "matches": comparisons, "revision": revision(row, membership), "matchRevision": revision(row, [membership, matches(row)])})
+        state["reconciliation"].append({"id": row.pk, "reference": f"{mode.upper()}-{row.pk}", "partyId": getattr(row, party_key(mode)+"_id"), "date": text_date(row.transaction_date), "currency": row.currency, "notes": row.notes, "status": status, "discrepancy": number(discrepancy) if discrepancy is not None else None, "calculationIssue": calculation_issue, "evaluation": evaluation, "settlement": evaluate_case(row), "findings": serialize_findings(row), "investigation": investigation, "investigationRevision": investigation_revision, "sku": sku_state, "claims": [serialize_claim(claim) for claim in row.supplier_claims.select_related("supplier").order_by("pk")] if mode=="ap" else [], "reconciledAt": text_date(row.reconciled_at), "orderIds": membership["purchase_orders"], "receiptIds": membership["delivery_receipts"], "invoiceIds": membership["sales_invoices"], "matches": comparisons, "revision": revision(row, membership), "matchRevision": revision(row, [membership, matches(row)])})
     return state

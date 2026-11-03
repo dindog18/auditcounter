@@ -235,6 +235,7 @@ def validate_allocation(allocation: PaymentAllocation) -> None:
         used = others.aggregate(total=Sum(field))["total"] or ZERO
         if used + getattr(allocation, field) > limit:
             errors[field] = "Allocated amount exceeds the payment amount."
+    from .deductions import applied_amount
     invoice_others = (
         type(allocation)
         .objects.filter(invoice=invoice)
@@ -248,7 +249,7 @@ def validate_allocation(allocation: PaymentAllocation) -> None:
         )
     )
     if (
-        allocated
+        allocated + applied_amount(invoice)
         + allocation.cash_amount
         + allocation.withholding_tax_amount
         + allocation.discount_amount
@@ -270,13 +271,20 @@ def validate_invoice_allocations(invoice: CompanySalesInvoice) -> None:
             ),
             ZERO,
         )
-        if allocated > invoice.total_amount:
+        from .deductions import applied_amount
+        for deduction in invoice.deductions.all():
+            if deduction.customer_id != invoice.customer_id or deduction.currency != invoice.currency:
+                raise ValidationError('Invoice identity is retained by deduction evidence.')
+            if deduction.applications.filter(reversal__isnull=True).exists() and invoice.invoice_status not in ('posted','disputed'):
+                raise ValidationError('Reverse deductions before changing invoice posting state.')
+        if allocated + applied_amount(invoice) > invoice.total_amount:
             raise ValidationError({"total_amount": "Invoice total is below its allocations."})
 
 
 def settled_amount(invoice: CompanySalesInvoice) -> Decimal:
     """Total the cash, withholding tax, and discounts from cleared payments."""
-    return sum(
+    from .deductions import applied_amount
+    return applied_amount(invoice) + sum(
         (
             allocation.cash_amount + allocation.withholding_tax_amount + allocation.discount_amount
             for allocation in invoice.payment_allocations.select_related("payment")
@@ -290,6 +298,10 @@ def validate_payment_amounts(payment: CustomerPayment) -> None:
     """Prevent reducing payment amounts below their existing allocations."""
     if not payment.pk:
         return
+    if payment.payment_status != 'reversed':
+        for allocation in payment.invoice_allocations.select_related('invoice'):
+            allocation.payment = payment
+            validate_allocation(allocation)
     for allocation_field, payment_field in (
         ("cash_amount", "amount_received"),
         ("withholding_tax_amount", "withholding_tax_amount"),

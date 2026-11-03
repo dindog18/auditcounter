@@ -1,5 +1,128 @@
 # Document routing
 
+Owns rule-based destination configuration, LLM routing attempt history and independent
+human destination reviews. It consumes saved extracted text rather than re-running OCR.
+The existing detailed routing/retry guide is retained below.
+
+## Application flow
+
+```mermaid
+flowchart TD
+    A[Select saved document or batch] --> B[Choose latest usable saved extraction]
+    B --> C[Check source review and explicit override if required]
+    C --> D[Snapshot active rules and destination catalog]
+    D --> E[Invoke configured routing provider]
+    E --> F{Complete structured result validates?}
+    F -->|No| G[Save failed attempt; no partial destination assignments]
+    F -->|Yes| H[Save zero or more independent DocumentRoute rows]
+    H --> I{Destination module}
+    I -->|AP / AR| J[Use submitted target configuration for accounting extraction]
+    I -->|Encoder| K[Prepare routed job and configured permitted operation]
+    H --> L[Human destination review remains independent]
+    J --> M[Inspect created record or explicit retry error]
+    K --> N[Separate local Encoder confirmation before any external execution]
+    L --> M
+```
+
+## Model and runtime boundaries
+
+`RoutingDestination` is a module/model destination; `RoutingRule` supplies matching
+instructions. `LLMRoutingLog` snapshots exact source text and rules. `DocumentRoute`
+records a single destination review and handoff outcome. A successful automatic handoff
+is not human approval. Completed processing is idempotent; explicit retry is needed
+after an inspected failure. Rerouting preserves earlier attempts.
+
+All provider calls, configuration changes and reviews use CSRF-protected POSTs.
+GET screens are read-only and require no application login. Provider configuration
+uses `ROUTER_*` and the shared `document_extraction.services.llm` transport.
+No background worker is introduced. See [accounting](../accounts_receivable/README.md)
+and [Encoder](../encoder/README.md) for downstream operations.
+
+## Tests
+
+```bash
+python auditcounter_django/manage.py test router --noinput
+node --test auditcounter_django/router/frontend_tests/*.test.cjs
+```
+
+## Model ERD
+
+These logical diagrams reflect the current Django model definitions. Key fields are
+shown; external entities appear as primary-key stubs and include their app prefix.
+`||` means exactly one, `|o` / `o|` zero or one, and `o{` / `}o` zero or more.
+FK optionality is represented on the parent side; one-to-one/unique FKs limit children.
+Many-to-many lines represent Django-managed join tables; service validation may impose
+stronger business constraints than these structural cardinalities.
+
+### Application models
+
+```mermaid
+erDiagram
+    router_RoutingDestination {
+        int destination_no PK
+        boolean is_deleted
+        string name
+        string module_name
+    }
+    router_RoutingRule {
+        int encoder_connection FK
+        int rule_no PK
+        int destination FK
+        string encoder_tool
+        string name
+        string document_type
+    }
+    router_LLMRoutingLog {
+        int routing_log_no PK
+        int source_document FK
+        int source_text_log FK
+        int source_llm_log FK
+        string status
+    }
+    router_DocumentRoute {
+        int route_no PK
+        int routing_log FK
+        int destination FK
+        string processing_status
+        decimal confidence
+        string review_status
+    }
+    document_extraction_DocExtractionLog {
+        int doc_log_no PK
+    }
+    document_extraction_Document {
+        int document_no PK
+    }
+    document_extraction_LLMExtractionLog {
+        int llm_log_no PK
+    }
+    encoder_MCPConnection {
+        int id PK
+    }
+    encoder_MCPConnection |o--o{ router_RoutingRule : "encoder_connection"
+    router_RoutingDestination ||--o{ router_RoutingRule : "destination"
+    document_extraction_Document ||--o{ router_LLMRoutingLog : "source_document"
+    document_extraction_DocExtractionLog |o--o{ router_LLMRoutingLog : "source_text_log"
+    document_extraction_LLMExtractionLog |o--o{ router_LLMRoutingLog : "source_llm_log"
+    router_LLMRoutingLog ||--o{ router_DocumentRoute : "routing_log"
+    router_RoutingDestination ||--o{ router_DocumentRoute : "destination"
+```
+
+### Model responsibilities
+
+| Model | Responsibility |
+|---|---|
+| `RoutingDestination` | Configured accounting or Encoder destination. |
+| `RoutingRule` | Human-configured matching instruction and optional Encoder operation. |
+| `LLMRoutingLog` | Input/rules/provider snapshot and routing attempt outcome. |
+| `DocumentRoute` | One independently reviewed destination decision and processing state. |
+
+For every field, delete policy, conditional constraint and index, consult
+[`models.py`](models.py) and the additive [`migrations/`](migrations/). These diagrams
+do not imply that an unmigrated database already has the same schema.
+
+## Detailed operating guide
+
 Routing reads saved extraction text, evaluates active human-configured rules with
 one LLM, and saves zero, one, or multiple `DocumentRoute` decisions per attempt.
 Each successful LLM match automatically invokes AP/AR accounting extraction using

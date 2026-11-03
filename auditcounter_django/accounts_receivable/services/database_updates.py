@@ -23,6 +23,8 @@ from . import configuration
 from .catalog import model, party_key, error_text, revision
 from .extraction import normalize_lines, values_for, validate_totals
 from .setup.database import stream_records
+from .setup.data_quality import validate_record, summary as quality_summary, finding
+from db_extraction.services.schema_comparison import schema_revision, configuration_issues
 
 MAX_ERRORS = 200
 
@@ -34,7 +36,8 @@ def encoded(value):
 def identity(mode, config, user):
     return {'mode': mode, 'configuration': config.pk, 'user': getattr(user, 'pk', None),
             'digest': hashlib.sha256(encoded(configuration.snapshot(config)).encode()).hexdigest(),
-            'source_revision': config.database_source.updated_at.isoformat()}
+            'source_revision': config.database_source.updated_at.isoformat(),
+            'schema_revision': schema_revision(config.database_source)}
 
 
 def local_record(mode, config, key, parsed, locked=False):
@@ -54,7 +57,7 @@ def local_record(mode, config, key, parsed, locked=False):
 
 
 def protected(record):
-    for name in ('reconciliation_cases', 'payment_allocations', 'invoice_allocations', 'allocations'):
+    for name in ('reconciliation_cases', 'payment_allocations', 'invoice_allocations', 'allocations', 'statement_matches', 'credit_applications', 'deductions'):
         related = getattr(record, name, None)
         if related is not None and related.exists():
             return True
@@ -161,6 +164,9 @@ def write_candidate(header, lines, previous, operation):
         return
     header.save()
     if not lines or lines is previous:
+        if hasattr(header,'invoice_reference_no'):
+            from discrepancies.services.duplicate_invoices import detect
+            detect(header)
         return
     parent = next(field.name for field in lines[0]._meta.fields if field.is_relation)
     numbers = {line.line_no for line in lines}
@@ -170,15 +176,30 @@ def write_candidate(header, lines, previous, operation):
     for line in lines:
         setattr(line, parent, header)
         line.save()
+    if hasattr(header,'invoice_reference_no'):
+        from discrepancies.services.duplicate_invoices import detect
+        detect(header)
 
 
 def scan(mode, config, apply=False):
+    config._quality_products = {}
     summary = {'count':0, 'created':0, 'updated':0, 'unchanged':0, 'error_count':0, 'errors':[]}
-    fingerprint, seen = hashlib.sha256(), set()
+    fingerprint, seen, source_keys = hashlib.sha256(), set(), set()
+    quality_issues, quality_errors, quality_warnings = [], 0, 0
     for key, parsed in stream_records(mode, config):
         key = json.loads(encoded(key))
         summary['count'] += 1
         try:
+            quality = validate_record(mode, config, parsed)
+            source_identity = encoded(key)
+            if source_identity in source_keys:
+                quality.append(finding('DUPLICATE_SOURCE_KEY', 'source_key', None, 'The source identifier occurs more than once.'))
+            source_keys.add(source_identity)
+            quality_errors += sum(item['blocking'] for item in quality)
+            quality_warnings += sum(not item['blocking'] for item in quality)
+            quality_issues.extend(quality[:max(0, MAX_ERRORS-len(quality_issues))])
+            if any(item['blocking'] for item in quality):
+                raise ValidationError([item['explanation'] for item in quality if item['blocking']])
             header, lines, old_lines, operation, local_hash = candidate(mode, config, key, parsed, locked=apply)
             for unique in uniqueness(header):
                 if unique in seen:
@@ -198,11 +219,19 @@ def scan(mode, config, apply=False):
     if not summary['count']:
         summary['error_count'] = 1
         summary['errors'].append({'key':{}, 'message':'No source records match this query. Adjust the row conditions.'})
+    summary['quality'] = {**quality_summary(quality_issues), 'blocking_count': quality_errors,
+                          'warning_count': quality_warnings, 'passed': not quality_errors,
+                          'truncated': quality_errors+quality_warnings>len(quality_issues)}
     summary.update(passed=not summary['error_count'], fingerprint=fingerprint.hexdigest(), errors_truncated=summary['error_count']>len(summary['errors']))
     return summary
 
 
 def review(mode, config, user, operation):
+    schema_issues = configuration_issues(config)
+    if schema_issues:
+        return {'count': 0, 'created': 0, 'updated': 0, 'unchanged': 0, 'error_count': len(schema_issues),
+                'passed': False, 'errors': [{'key': {}, 'message': item['explanation']} for item in schema_issues],
+                'quality': quality_summary(schema_issues)}
     configuration.validate(config, mode, submit=True)
     result = scan(mode, config)
     if result['passed']:

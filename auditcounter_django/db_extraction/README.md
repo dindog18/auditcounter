@@ -1,4 +1,141 @@
-# PostgreSQL metadata workspace
+# PostgreSQL schema extraction
+
+Owns encrypted connection profiles and versioned PostgreSQL structure snapshots used
+by accounting mapping. This app captures metadata, not copies of external business
+rows. The shared accounting query/import layer performs separately reviewed source reads.
+
+## Application flow
+
+```mermaid
+flowchart TD
+    A[Enter connection and schema selection] --> B[Test exact submitted settings]
+    B --> C{Connection succeeds?}
+    C -->|No| D[Return validation error without saving]
+    C -->|Yes| E[Encrypt secret and save local profile]
+    E --> F[Explicit schema refresh]
+    F --> G[Read PostgreSQL catalogs in read-only transaction]
+    G --> H{Snapshot completes?}
+    H -->|Yes| I[Atomically save run / schemas / tables / columns / constraints / indexes]
+    H -->|No| J[Retain failed attempt and earlier completed snapshots]
+    I --> K[Accounting selects captured tables and reviews mappings]
+    K --> L[Compare latest completed schema before accounting import/update]
+    L --> M{Removed or changed mapped source?}
+    M -->|Yes| N[Block affected import and explicitly review corrected mapping]
+    M -->|No| O[Accounting may perform reviewed read-only source query]
+```
+
+## Schema drift and consumers
+
+`services/schema_comparison.py` checks the mapped source projection against the latest
+completed snapshot: removed tables/columns, type and financial-precision changes,
+nullability, ordered primary keys and database identity. Names are not guessed when
+a column disappears. Refresh metadata explicitly after external schema changes, select
+the current table snapshot, correct the mapping, validate again and confirm the update.
+Signed accounting review receipts include the schema revision. This app does not
+silently retarget a mapping or rewrite prior snapshots.
+
+See [Record First setup](../accounts_receivable/SETUP.md) and the
+[reviewed migration guide](../accounts_receivable/DATABASE_MIGRATION.md) for business-row
+queries and atomic local accounting writes. The existing connection/credential guide
+below remains applicable.
+
+## Tests
+
+```bash
+python auditcounter_django/manage.py test db_extraction accounts_receivable.test_data_quality --noinput
+```
+
+Tests use disposable local data and mocked source reads. Any live source integration
+needs separately configured read-only PostgreSQL credentials; keep those and the
+credential encryption key out of Git. No application login is required.
+
+## Model ERD
+
+These logical diagrams reflect the current Django model definitions. Key fields are
+shown; external entities appear as primary-key stubs and include their app prefix.
+`||` means exactly one, `|o` / `o|` zero or one, and `o{` / `}o` zero or more.
+FK optionality is represented on the parent side; one-to-one/unique FKs limit children.
+Many-to-many lines represent Django-managed join tables; service validation may impose
+stronger business constraints than these structural cardinalities.
+
+### Application models
+
+```mermaid
+erDiagram
+    db_extraction_DatabaseSource {
+        int id PK
+        string ssl_mode
+    }
+    db_extraction_ExtractionRun {
+        int id PK
+        int source FK
+        string status
+    }
+    db_extraction_DatabaseSchema {
+        int id PK
+        int run FK
+        string name
+        string owner
+        string comment
+    }
+    db_extraction_DatabaseTable {
+        int id PK
+        int schema FK
+        string relation_kind
+    }
+    db_extraction_DatabaseColumn {
+        int id PK
+        int table FK
+        string identity_generation
+    }
+    db_extraction_DatabaseConstraint {
+        int id PK
+        int table FK
+        string constraint_type
+        string referenced_schema
+        string referenced_table
+    }
+    db_extraction_ConstraintColumn {
+        int id PK
+        int constraint FK
+        int column FK
+        string referenced_column_name
+    }
+    db_extraction_DatabaseIndex {
+        int id PK
+        int table FK
+        string name
+        string definition
+        string access_method
+    }
+    db_extraction_DatabaseSource ||--o{ db_extraction_ExtractionRun : "source"
+    db_extraction_ExtractionRun ||--o{ db_extraction_DatabaseSchema : "run"
+    db_extraction_DatabaseSchema ||--o{ db_extraction_DatabaseTable : "schema"
+    db_extraction_DatabaseTable ||--o{ db_extraction_DatabaseColumn : "table"
+    db_extraction_DatabaseTable ||--o{ db_extraction_DatabaseConstraint : "table"
+    db_extraction_DatabaseConstraint ||--o{ db_extraction_ConstraintColumn : "constraint"
+    db_extraction_DatabaseColumn ||--o{ db_extraction_ConstraintColumn : "column"
+    db_extraction_DatabaseTable ||--o{ db_extraction_DatabaseIndex : "table"
+```
+
+### Model responsibilities
+
+| Model | Responsibility |
+|---|---|
+| `DatabaseSource` | Encrypted external PostgreSQL connection profile. |
+| `ExtractionRun` | One independent metadata snapshot attempt. |
+| `DatabaseSchema` | Schema captured in a particular run. |
+| `DatabaseTable` | Table/view metadata captured within a schema. |
+| `DatabaseColumn` | Column types, nullability, defaults and related metadata. |
+| `DatabaseConstraint` | Primary/foreign/unique/check constraint metadata. |
+| `ConstraintColumn` | Ordered membership of columns in a captured constraint. |
+| `DatabaseIndex` | Captured index definition and attributes. |
+
+For every field, delete policy, conditional constraint and index, consult
+[`models.py`](models.py) and the additive [`migrations/`](migrations/). These diagrams
+do not imply that an unmigrated database already has the same schema.
+
+## Detailed operating guide
 
 Manage multiple PostgreSQL connections at `/databases/`. The workspace shares the
 Falcon layout and navigation with Document Extraction and opens directly without

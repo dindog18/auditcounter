@@ -17,6 +17,50 @@ def perform(request, mode, action, record_id=None):
         data = json.loads(request.body)
         if not isinstance(data, dict):
             raise ValidationError("Expected a JSON object.")
+        if action=='root-cause-review' and record_id:
+            from discrepancies.services.analytics import review_root_cause,serialize_root_cause
+            case=get_object_or_404(model(mode,'Transaction'),pk=record_id)
+            return JsonResponse({'root_cause':serialize_root_cause(review_root_cause(case,data))})
+        if mode=='ar' and action in {'deduction-create','deduction-review','deduction-apply','deduction-reverse'}:
+            from . import deductions
+            result=deductions.create_deduction(data) if action=='deduction-create' else {'deduction-review':deductions.review,'deduction-apply':deductions.apply,'deduction-reverse':deductions.reverse_application}[action](record_id,data)
+            return JsonResponse({'id':result.pk})
+        if mode=='ap' and action in {'statement-create','statement-reconcile','statement-review'}:
+            from accounts_payable.services import statements
+            result=statements.create_statement(data) if action=='statement-create' else statements.reconcile(record_id,data) if action=='statement-reconcile' else statements.review_line(record_id,data)
+            return JsonResponse({'id':result.pk})
+        if mode=='ap' and action in {'claim-create','claim-transition','claim-correspondence','claim-resolve'} and record_id:
+            from discrepancies.services import claims
+            operation={'claim-create':claims.create_claim,'claim-transition':claims.transition,'claim-correspondence':claims.correspond,'claim-resolve':claims.resolve}[action]
+            return JsonResponse({'claim':claims.serialize(operation(record_id,data))})
+        if action=='duplicate-scan' and record_id:
+            from discrepancies.services.duplicate_invoices import detect
+            from .catalog import check_revision,party_key
+            from .financial import body
+            body(data,('revision',))
+            with transaction.atomic():
+                invoice=get_object_or_404(model(mode,'sales_invoice'),pk=record_id)
+                model(mode,party_key(mode)).objects.select_for_update().get(pk=getattr(invoice,party_key(mode)+'_id'))
+                invoice=model(mode,'sales_invoice').objects.get(pk=record_id)
+                check_revision(invoice,data.get('revision'))
+                candidates=detect(invoice)
+                invoice_ids={invoice.pk}
+                for candidate in candidates:
+                    invoice_ids.update((getattr(candidate,mode+'_first_id'),getattr(candidate,mode+'_second_id')))
+                for case in model(mode,'Transaction').objects.filter(sales_invoices__pk__in=invoice_ids).distinct().order_by('pk'):
+                    case.refresh_reconciliation_status()
+            return JsonResponse({'candidate_ids':[row.pk for row in candidates]})
+        if mode=='ap' and action in {'credit-create','credit-verify','credit-apply','credit-reverse'}:
+            from accounts_payable.services import credits
+            if action=='credit-create':
+                result=credits.create_credit(data)
+            elif action=='credit-verify':
+                result=credits.verify_credit(record_id,data)
+            elif action=='credit-apply':
+                result=credits.apply_credit(record_id,data)
+            else:
+                result=credits.reverse_application(record_id,data)
+            return JsonResponse({'id':result.pk})
         if action == 'record-delete' and record_id:
             records.delete_document(mode, data.get('resource'), record_id, data)
             return JsonResponse({'deleted': True, 'id': record_id})
@@ -72,6 +116,9 @@ def perform(request, mode, action, record_id=None):
                     model(mode,party_key(mode)).objects.select_for_update().get(pk=getattr(case,party_key(mode)+'_id'))
                 case = model(mode,"Transaction").objects.select_for_update().get(pk=record_id)
                 check_revision(case, data.get('revision'), [records.case_membership(case),records.matches(case)])
+                from discrepancies.services.duplicate_invoices import detect
+                for invoice in case.sales_invoices.order_by('pk'):
+                    detect(invoice)
                 case.refresh_reconciliation_status()
             return JsonResponse({'id':case.pk})
         if action == "match-suggestions" and record_id:

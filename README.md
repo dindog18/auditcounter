@@ -19,6 +19,23 @@ AuditCounter is a Django workspace for extracting business documents, preparing 
 
 See the [query builder guide](auditcounter_django/accounts_receivable/QUERY_BUILDER.md) for supported transformations and the [migration guide](auditcounter_django/accounts_receivable/DATABASE_MIGRATION.md) for review and update behavior.
 
+## Django app documentation
+
+Each app guide includes its application flowchart, model ERD, service boundaries,
+setup/use instructions and tests. Diagrams describe the current model definitions;
+apply migrations before using new database-backed workflows.
+
+| App | Guide |
+|---|---|
+| Document extraction | [Original documents, batches, extraction and review](auditcounter_django/document_extraction/README.md) |
+| Database extraction | [PostgreSQL metadata, encrypted connections and schema drift](auditcounter_django/db_extraction/README.md) |
+| Accounts payable | [Supplier matching, payments, credits and statements](auditcounter_django/accounts_payable/README.md) |
+| Accounts receivable | [Customer matching, deductions and shared accounting services](auditcounter_django/accounts_receivable/README.md) |
+| Router | [Destination rules, attempt history and reviewed handoffs](auditcounter_django/router/README.md) |
+| Discrepancies | [Findings, evidence, investigations, claims, timeline and analytics](auditcounter_django/discrepancies/README.md) |
+| SKU matching | [Normalized identity, reviewed equivalences and optional proposals](auditcounter_django/sku_matching/README.md) |
+| Encoder | [Separate local MCP preparation and explicitly confirmed execution](auditcounter_django/encoder/README.md) |
+
 ## Requirements
 
 - Python 3.14 and the dependencies pinned in the root [`requirements.txt`](requirements.txt).

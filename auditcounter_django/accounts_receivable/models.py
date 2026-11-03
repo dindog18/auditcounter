@@ -425,8 +425,10 @@ class CompanySalesInvoice(models.Model):
 
     def save(self, *args, **kwargs):
         self.source_record_key = services.normalize_source_key(self.source_record_key)
-        self.full_clean()
         with transaction.atomic():
+            from discrepancies.services.timeline import lock_account
+            lock_account(self)
+            self.full_clean()
             result = super().save(*args, **kwargs)
             services.refresh_document_cases(self)
             return result
@@ -1323,3 +1325,110 @@ class DatabaseImportRun(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class DeductionHistoryQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError('Use reviewed deduction operations; history cannot be bulk rewritten.')
+
+    def delete(self):
+        raise ValidationError('Deduction history cannot be deleted.')
+
+
+class CustomerDeduction(models.Model):
+    objects = DeductionHistoryQuerySet.as_manager()
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name='deductions')
+    invoice = models.ForeignKey(CompanySalesInvoice, on_delete=models.PROTECT, related_name='deductions')
+    payment = models.ForeignKey(CustomerPayment, null=True, blank=True, on_delete=models.PROTECT, related_name='deductions')
+    reference = models.CharField(max_length=100)
+    reason_code = models.CharField(max_length=30, choices=[('shortage','Quantity shortage'),('pricing','Pricing dispute'),('damage','Damaged goods'),('other','Other documented dispute')])
+    claimed_amount = models.DecimalField(max_digits=15, decimal_places=2)
+    accepted_amount = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal('0'))
+    currency = models.CharField(max_length=3, validators=[RegexValidator(r'^[A-Z]{3}$')])
+    status = models.CharField(max_length=12, default='pending', choices=[('pending','Pending review'),('accepted','Accepted'),('rejected','Rejected')])
+    source_document = models.ForeignKey('document_extraction.Document', on_delete=models.PROTECT, related_name='customer_deductions')
+    resolution_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['customer','reference'], name='ar_deduction_reference'),
+            models.CheckConstraint(condition=Q(claimed_amount__gt=0,accepted_amount__gte=0) & Q(accepted_amount__lte=models.F('claimed_amount')), name='ar_deduction_amounts')]
+
+    def save(self, *args, **kwargs):
+        from .services.financial import amount
+        self.claimed_amount = amount(self.claimed_amount)
+        self.accepted_amount = amount(self.accepted_amount, positive=False)
+        if not self._state.adding:
+            old = type(self).objects.get(pk=self.pk)
+            fields = ('customer_id','invoice_id','payment_id','reference','reason_code','claimed_amount','currency','source_document_id')
+            if any(getattr(old, field) != getattr(self, field) for field in fields):
+                raise ValidationError('Preserve original deduction evidence; review or reverse instead.')
+        self.full_clean()
+        if self.invoice.customer_id != self.customer_id or self.invoice.currency != self.currency:
+            raise ValidationError('Deduction account and currency must match the invoice.')
+        if self.payment_id and (self.payment.customer_id != self.customer_id or self.payment.currency != self.currency):
+            raise ValidationError('Deduction payment account and currency must agree.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Preserve deduction history.')
+
+
+class DeductionObservation(models.Model):
+    objects = DeductionHistoryQuerySet.as_manager()
+    deduction = models.ForeignKey(CustomerDeduction, on_delete=models.PROTECT, related_name='observations')
+    state = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError('Deduction observations are append-only.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Deduction observations are append-only.')
+
+
+class DeductionApplication(models.Model):
+    objects = DeductionHistoryQuerySet.as_manager()
+    deduction = models.ForeignKey(CustomerDeduction, on_delete=models.PROTECT, related_name='applications')
+    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    request_key = models.CharField(max_length=100)
+    notes = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['deduction','request_key'], name='ar_deduction_request'),
+            models.CheckConstraint(condition=Q(amount__gt=0), name='ar_deduction_application_positive')]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError('Deduction applications require explicit reversals.')
+        from .services.deductions import validate_application
+        with transaction.atomic():
+            Customer.objects.select_for_update().get(pk=self.deduction.customer_id)
+            self.deduction = CustomerDeduction.objects.select_for_update().get(pk=self.deduction_id)
+            self.full_clean()
+            validate_application(self)
+            result = super().save(*args, **kwargs)
+            return result
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Deduction applications require explicit reversals.')
+
+
+class DeductionReversal(models.Model):
+    objects = DeductionHistoryQuerySet.as_manager()
+    application = models.OneToOneField(DeductionApplication, on_delete=models.PROTECT, related_name='reversal')
+    reason = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError('Deduction reversals are append-only.')
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Deduction reversals are append-only.')

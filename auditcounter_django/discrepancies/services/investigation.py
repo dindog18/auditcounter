@@ -157,6 +157,8 @@ def review_finding(case, data):
         finding.review_decision, finding.review_notes, finding.reviewed_at=decision,notes,timezone.now()
         finding.review_basis=finding_basis(finding) if decision!='unreviewed' else ''
         finding.save(update_fields=['review_decision','review_notes','reviewed_at','review_basis'])
+        from .analytics import flag_stale_causes
+        flag_stale_causes(case)
         append_activity(investigation,'review',data,notes=notes,finding=finding,details=dict(previous_decision=previous,
             decision=decision,finding=finding_state(finding),review_basis=finding.review_basis,
             evidence_ids=list(finding.evidence.values_list('pk',flat=True))))
@@ -205,6 +207,9 @@ def resolve_references(case, data, *, require_current):
 def evidence_is_current(case, item):
     if item.finding_snapshot.get('status')!=item.finding.status:
         return False
+    if item.field_name in ('statement','deduction','settlement'):
+        from . import current_evidence
+        return any(row['source_model']==item.source_model and row['source_record_id']==item.source_record_id and row['observed_value']==item.observed_value for row in current_evidence(case,item.finding))
     if item.evidence_type=='ALLOCATION':
         fields={field:item.observed_value[field] for field in ('invoice_line_id','purchase_order_line_id','delivery_receipt_line_id')}
         match=case.line_matches.filter(**fields).first()
@@ -236,7 +241,8 @@ def resolve_investigation(case, data):
         service=import_module(f'{case._meta.app_label}.services.reconciliation')
         evaluation=service.evaluate_reconciliation(case)  # Read-only: human decisions never assign accounting statuses.
         active=list(case.discrepancy_findings.filter(status='open'))
-        live={digest({'code':item['finding_code'],'identity':item['identity']}):item for item in evaluation['discrepancy_findings']}
+        from . import evaluate_findings
+        live={digest({'code':item['finding_code'],'identity':item['identity']}):item for item in evaluate_findings(case,evaluation)}
         stored={digest({'code':item.finding_code,'identity':item.identity}):item for item in active}
         comparison_fields=('finding_code','summary','severity','expected_value','actual_value','difference_amount','currency','rule_version','identity','details')
         stale=set(live)!=set(stored)

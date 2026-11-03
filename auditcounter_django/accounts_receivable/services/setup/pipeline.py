@@ -365,6 +365,9 @@ def validate(mode, record, query, complete=False):
                 fail('Match required accounting field '+field['label']+'.')
         if any(not identities.get(sid) for sid in lineage):
             fail('Related line-item tables need primary keys to preserve repeated rows.')
+    if complete:
+        from db_extraction.services.schema_comparison import require_current_schema
+        require_current_schema(tables.values())
     query['keys'] = keys
     return {'tables': tables, 'source': source, 'keys': keys, 'key_names': [key[5:] for key in source_keys],
             'output_columns': list(columns.values()), 'hidden': hidden, 'identities': identities,

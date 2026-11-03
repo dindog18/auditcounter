@@ -1,0 +1,15 @@
+/* Human attribution is separate from rule codes and preserved in case activity. */
+(() => {
+  'use strict';
+  const config=JSON.parse(document.getElementById('finance-config').textContent);
+  if(config.resource!=='reconciliation'||config.screen!=='detail')return;
+  const api=window.BizmaticAccounting,record=api.state.reconciliation.find(r=>r.id===config.recordId);if(!record)return;
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const categories={receiving:'Receiving process',pricing:'Pricing / terms',documentation:'Missing or incorrect documents',source_data:'Source data / extraction',sku_identity:'Product identifier inconsistency',duplication:'Duplicate recording',settlement:'Payment / adjustment processing',other:'Other documented cause'};
+  for(const finding of record.findings||[]){const host=document.getElementById('finding-'+finding.id);if(!host)continue;
+    const root=finding.rootCause,section=document.createElement('section');section.className='border-top pt-3';
+    section.innerHTML=`<h3 class="fs-9">Reviewed root cause</h3><p>${root?`${esc(categories[root.category]||root.category)} · ${esc(root.status)} · ${esc(root.reviewed_at)}<br>${esc(root.explanation)}<br>Staff label (unverified): ${esc(root.actor_label)}`:'No human attribution recorded.'}</p>${record.investigation&&!record.investigation.closed&&finding.reviewDecision==='confirmed'&&!finding.reviewStale?`<details><summary>Record cause using confirmed evidence</summary><form><label class="d-block">Cause<select name="category" class="form-select">${Object.entries(categories).map(([v,l])=>`<option value="${v}" ${root?.category===v?'selected':''}>${esc(l)}</option>`).join('')}</select></label><label class="d-block">Explanation<textarea name="explanation" class="form-control" maxlength="10000" required>${esc(root?.explanation)}</textarea></label><fieldset><legend class="fs-9">Supporting snapshots</legend>${finding.evidence.map(e=>`<label class="d-block"><input type="checkbox" name="evidence_ids" value="${e.id}"> ${esc(e.type)} · ${esc(e.reference)} · ${esc(e.capturedAt)}</label>`).join('')}</fieldset><label class="d-block">Staff label (optional, unverified)<input class="form-control" name="actor_label" maxlength="150"></label><button class="btn btn-falcon-default mt-2">Record reviewed cause</button><p class="text-danger" role="alert"></p></form></details>`:'<p>Confirm the current finding in an open investigation before attributing its cause.</p>'}`;
+    host.appendChild(section);
+    section.addEventListener('submit',async e=>{e.preventDefault();const fd=new FormData(e.target);try{await api.post('root-cause-review',record.id,{revision:record.investigationRevision,finding_id:finding.id,category:fd.get('category'),explanation:fd.get('explanation'),actor_label:fd.get('actor_label'),evidence_ids:fd.getAll('evidence_ids').map(Number)});location.reload();}catch(error){section.querySelector('[role="alert"]').textContent=error.message;}});
+  }
+})();

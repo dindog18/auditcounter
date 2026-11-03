@@ -1,4 +1,445 @@
-> The primary AP/AR Extraction Setup now uses **Record First**. See [SETUP.md](SETUP.md) for its frontend/backend structure, real document/query tests, and confirmed-save protocol. The conversational endpoints below remain compatible with existing integrations.
+# Accounts receivable and shared accounting services
+
+Owns customer-side PO/DR/invoice/payment records, matching and reviewed deductions.
+It also hosts shared AP/AR workspace, setup, import, matching and HTTP services.
+Always pass the explicit module (`ar` or `ap`); never infer identity from an integer
+case ID alone. The detailed existing extraction/setup guide is retained below.
+
+## Application flow
+
+```mermaid
+flowchart TD
+    A[Customer and reviewed source configuration] --> B[Validate source quality / schema and resolve account]
+    B --> C[Save local documents and original provenance]
+    C --> D[Create reconciliation case with document sets]
+    D --> E[Exact duplicate guard and advisory overlaps]
+    E --> F[Manual matching or deterministic Auto Match preview]
+    F --> G[Explicit save after revision and allocation-capacity checks]
+    G --> H[Compute PO / DR / SI result and persist findings]
+    H --> I[Human investigation and finding review]
+    I --> J[Timeline and reviewed causes]
+    C --> K[Allocate customer payment components]
+    K --> L[Show collectible invoice balance]
+    L --> M{Customer claims deduction?}
+    M -->|No| N[Continue collection / evidence review]
+    M -->|Documented dispute| O[Record pending deduction with evidence]
+    O --> P[Accept / reject / request further evidence]
+    P --> Q[Explicit accepted application or immutable reversal]
+    Q --> L
+    H --> R[Unified discrepancy dashboard]
+    J --> R
+    Q --> R
+```
+
+## Current matching, settlement and deduction behavior
+
+- Multiple allocations can support one invoice line. Validation checks invoice,
+  purchase-order and accepted receipt quantities across all cases, including concurrent
+  PostgreSQL writes. Invalid replacements cannot partially erase saved matches.
+- Supplier/customer, currency, document membership, product identity and units must
+  agree. Approved SKU equivalences confirm identity only; all financial guards remain.
+- Auto Match proposes deterministic, bounded allocations; ambiguity or price differences
+  require review. Preview does not persist matches or override saved manual work.
+- Physical matching, finding open/cleared state and human investigation status are
+  independent. Settlement is a separate backend evaluation of cleared cash, withholding,
+  discount and explicit accepted adjustments.
+- A 100,000 invoice with 95,000 received remains 5,000 collectible. Recording or accepting
+  a deduction alone does not settle it. Only explicit accepted applications adjust the
+  balance; reversals restore it and retain history. Rejected deductions remain collectible.
+- Use `/accounts-receivable/deductions/` to record/review/apply/reverse customer disputes.
+  Original uploaded evidence is required. Optional payment links must allocate to the
+  invoice. Do not classify normal withholding or approved discounts as deductions.
+
+## Shared service map
+
+| Module | Responsibility |
+|---|---|
+| `services/catalog.py`, `financial.py` | AP/AR identity/field allowlists, revisions and Decimal input validation |
+| `services/setup/`, `configuration.py`, `configuration_chat.py` | Record First setup, proposals, validation and explicit confirmation |
+| `services/extraction.py`, `imports.py`, `database_updates.py` | Atomic local extraction/import and reviewed updates; external sources read-only |
+| `services/case_duplicates.py`, `records.py` | Case identity, account-first locks, membership, matching and payment persistence |
+| `services/auto_matching.py`, `evaluation.py` | Pure deterministic matching suggestions and physical discrepancy evaluation |
+| `services/settlement.py`, `deductions.py` | Independent settlement evaluation and customer dispute workflows |
+| `services/pages.py`, `http.py`, `ui.py` | Shared serialization, existing JSON actions and routes |
+| `static/accounting/`, `templates/accounting/` | Existing Django/JavaScript workspace, no new frontend framework |
+
+AR deduction API actions under `/accounts-receivable/api/`: `deduction-create`,
+`deduction-review/<id>`, `deduction-apply/<id>`, `deduction-reverse/<id>`. Use POST JSON
+with CSRF, current revision, evidence references and explicit explanations. Exact
+application retries use an idempotency key; conflicting or stale writes are rejected.
+
+## Run and verify
+
+```bash
+python auditcounter_django/manage.py migrate
+python auditcounter_django/manage.py runserver 127.0.0.1:8000
+python auditcounter_django/manage.py test accounts_receivable accounts_payable discrepancies sku_matching --noinput
+node --test auditcounter_django/accounts_receivable/frontend_tests/*.test.cjs auditcounter_django/router/frontend_tests/*.test.cjs
+```
+
+Use the Python environment and `.env` setup in the [project README](../../README.md).
+`ACCOUNTS_RECEIVABLE_*` selects the record-extraction provider; `CONFIG_ASSISTANT_*`
+selects configuration assistance. Deduction entry is manual with an original uploaded
+document; automated acceptance and deduction extraction/import are not exposed.
+A disposable PostgreSQL application DB is required to verify row-lock guarantees;
+SQLite tests alone cannot establish them. Trusted local workspaces require no login.
+
+## Model ERD
+
+These logical diagrams reflect the current Django model definitions. Key fields are
+shown; external entities appear as primary-key stubs and include their app prefix.
+`||` means exactly one, `|o` / `o|` zero or one, and `o{` / `}o` zero or more.
+FK optionality is represented on the parent side; one-to-one/unique FKs limit children.
+Many-to-many lines represent Django-managed join tables; service validation may impose
+stronger business constraints than these structural cardinalities.
+
+### Documents, lines and matching
+
+```mermaid
+erDiagram
+    accounts_receivable_Customer {
+        int customer_no PK
+        decimal credit_limit
+    }
+    accounts_receivable_CustomerPurchaseOrder {
+        int customer_purchase_order_no PK
+        int customer FK
+        int source_table FK
+        int source_llm_log FK
+        int source_text_log FK
+        int source_document FK
+        int source_database FK
+        string po_reference_no
+        decimal subtotal
+        decimal discount_amount
+        decimal tax_amount
+        decimal total_amount
+        string status
+    }
+    accounts_receivable_CompanyDeliveryReceipt {
+        int company_delivery_receipt_no PK
+        int customer FK
+        int proof_of_delivery FK
+        int source_table FK
+        int source_llm_log FK
+        int source_text_log FK
+        int source_document FK
+        int source_database FK
+        string dr_reference_no
+        string delivery_status
+        json source_record_key
+    }
+    accounts_receivable_CompanySalesInvoice {
+        int company_sales_invoice_no PK
+        int customer FK
+        int source_table FK
+        int source_llm_log FK
+        int source_text_log FK
+        int source_document FK
+        int source_database FK
+        string invoice_reference_no
+        decimal subtotal
+        decimal discount_amount
+        decimal tax_amount
+        decimal total_amount
+        string payment_status
+    }
+    accounts_receivable_CustomerPayment {
+        int customer_payment_no PK
+        int customer FK
+        int proof_of_payment FK
+        int source_table FK
+        int source_llm_log FK
+        int source_text_log FK
+        int source_document FK
+        int source_database FK
+        string payment_reference_no
+        string bank_reference_no
+        decimal amount_received
+        decimal withholding_tax_amount
+        decimal discount_taken
+        string payment_status
+    }
+    accounts_receivable_Transaction {
+        int transaction_no PK
+        int customer FK
+        string reconciliation_status
+        decimal total_discrepancy_amount
+    }
+    accounts_receivable_CustomerPurchaseOrderLine {
+        int id PK
+        int purchase_order FK
+        string item_code
+        decimal quantity_ordered
+        decimal unit_price
+        decimal discount_amount
+        decimal tax_amount
+        decimal line_total
+    }
+    accounts_receivable_CompanyDeliveryReceiptLine {
+        int id PK
+        int delivery_receipt FK
+        string item_code
+        decimal quantity_stated
+        decimal quantity_received
+        decimal quantity_accepted
+        decimal quantity_rejected
+    }
+    accounts_receivable_CompanySalesInvoiceLine {
+        int id PK
+        int invoice FK
+        string item_code
+        decimal quantity_invoiced
+        decimal unit_price
+        decimal discount_amount
+        decimal tax_amount
+        decimal line_total
+    }
+    accounts_receivable_DocumentMatch {
+        int id PK
+        int transaction FK
+        int purchase_order_line FK
+        int delivery_receipt_line FK
+        int invoice_line FK
+        decimal matched_quantity
+        string match_status
+    }
+    accounts_receivable_PaymentAllocation {
+        int id PK
+        int payment FK
+        int invoice FK
+        decimal cash_amount
+        decimal withholding_tax_amount
+        decimal discount_amount
+    }
+    db_extraction_DatabaseSource {
+        int id PK
+    }
+    db_extraction_DatabaseTable {
+        int id PK
+    }
+    document_extraction_DocExtractionLog {
+        int doc_log_no PK
+    }
+    document_extraction_Document {
+        int document_no PK
+    }
+    document_extraction_LLMExtractionLog {
+        int llm_log_no PK
+    }
+    accounts_receivable_Customer ||--o{ accounts_receivable_CustomerPurchaseOrder : "customer"
+    db_extraction_DatabaseTable |o--o{ accounts_receivable_CustomerPurchaseOrder : "source_table"
+    document_extraction_LLMExtractionLog |o--o{ accounts_receivable_CustomerPurchaseOrder : "source_llm_log"
+    document_extraction_DocExtractionLog |o--o{ accounts_receivable_CustomerPurchaseOrder : "source_text_log"
+    document_extraction_Document |o--o{ accounts_receivable_CustomerPurchaseOrder : "source_document"
+    db_extraction_DatabaseSource |o--o{ accounts_receivable_CustomerPurchaseOrder : "source_database"
+    accounts_receivable_Customer |o--o{ accounts_receivable_CompanyDeliveryReceipt : "customer"
+    document_extraction_Document |o--o{ accounts_receivable_CompanyDeliveryReceipt : "proof_of_delivery"
+    db_extraction_DatabaseTable |o--o{ accounts_receivable_CompanyDeliveryReceipt : "source_table"
+    document_extraction_LLMExtractionLog |o--o{ accounts_receivable_CompanyDeliveryReceipt : "source_llm_log"
+    document_extraction_DocExtractionLog |o--o{ accounts_receivable_CompanyDeliveryReceipt : "source_text_log"
+    document_extraction_Document |o--o{ accounts_receivable_CompanyDeliveryReceipt : "source_document"
+    db_extraction_DatabaseSource |o--o{ accounts_receivable_CompanyDeliveryReceipt : "source_database"
+    accounts_receivable_Customer |o--o{ accounts_receivable_CompanySalesInvoice : "customer"
+    db_extraction_DatabaseTable |o--o{ accounts_receivable_CompanySalesInvoice : "source_table"
+    document_extraction_LLMExtractionLog |o--o{ accounts_receivable_CompanySalesInvoice : "source_llm_log"
+    document_extraction_DocExtractionLog |o--o{ accounts_receivable_CompanySalesInvoice : "source_text_log"
+    document_extraction_Document |o--o{ accounts_receivable_CompanySalesInvoice : "source_document"
+    db_extraction_DatabaseSource |o--o{ accounts_receivable_CompanySalesInvoice : "source_database"
+    accounts_receivable_Customer |o--o{ accounts_receivable_CustomerPayment : "customer"
+    document_extraction_Document |o--o{ accounts_receivable_CustomerPayment : "proof_of_payment"
+    db_extraction_DatabaseTable |o--o{ accounts_receivable_CustomerPayment : "source_table"
+    document_extraction_LLMExtractionLog |o--o{ accounts_receivable_CustomerPayment : "source_llm_log"
+    document_extraction_DocExtractionLog |o--o{ accounts_receivable_CustomerPayment : "source_text_log"
+    document_extraction_Document |o--o{ accounts_receivable_CustomerPayment : "source_document"
+    db_extraction_DatabaseSource |o--o{ accounts_receivable_CustomerPayment : "source_database"
+    accounts_receivable_Customer |o--o{ accounts_receivable_Transaction : "customer"
+    accounts_receivable_Transaction }o--o{ accounts_receivable_CustomerPurchaseOrder : "purchase_orders"
+    accounts_receivable_Transaction }o--o{ accounts_receivable_CompanyDeliveryReceipt : "delivery_receipts"
+    accounts_receivable_Transaction }o--o{ accounts_receivable_CompanySalesInvoice : "sales_invoices"
+    accounts_receivable_CustomerPurchaseOrder ||--o{ accounts_receivable_CustomerPurchaseOrderLine : "purchase_order"
+    accounts_receivable_CompanyDeliveryReceipt ||--o{ accounts_receivable_CompanyDeliveryReceiptLine : "delivery_receipt"
+    accounts_receivable_CompanySalesInvoice ||--o{ accounts_receivable_CompanySalesInvoiceLine : "invoice"
+    accounts_receivable_Transaction ||--o{ accounts_receivable_DocumentMatch : "transaction"
+    accounts_receivable_CustomerPurchaseOrderLine |o--o{ accounts_receivable_DocumentMatch : "purchase_order_line"
+    accounts_receivable_CompanyDeliveryReceiptLine |o--o{ accounts_receivable_DocumentMatch : "delivery_receipt_line"
+    accounts_receivable_CompanySalesInvoiceLine ||--o{ accounts_receivable_DocumentMatch : "invoice_line"
+    accounts_receivable_CustomerPayment ||--o{ accounts_receivable_PaymentAllocation : "payment"
+    accounts_receivable_CompanySalesInvoice ||--o{ accounts_receivable_PaymentAllocation : "invoice"
+```
+
+### Reviewed deductions
+
+```mermaid
+erDiagram
+    accounts_receivable_CustomerDeduction {
+        int id PK
+        int customer FK
+        int invoice FK
+        int payment FK
+        int source_document FK
+        string reference
+        string reason_code
+        decimal claimed_amount
+        decimal accepted_amount
+        string status
+    }
+    accounts_receivable_DeductionObservation {
+        int id PK
+        int deduction FK
+        json state
+        datetime created_at
+    }
+    accounts_receivable_DeductionApplication {
+        int id PK
+        int deduction FK
+        decimal amount
+    }
+    accounts_receivable_DeductionReversal {
+        int id PK
+        int application FK
+        string reason
+        datetime created_at
+    }
+    accounts_receivable_CompanySalesInvoice {
+        int company_sales_invoice_no PK
+    }
+    accounts_receivable_Customer {
+        int customer_no PK
+    }
+    accounts_receivable_CustomerPayment {
+        int customer_payment_no PK
+    }
+    document_extraction_Document {
+        int document_no PK
+    }
+    accounts_receivable_Customer ||--o{ accounts_receivable_CustomerDeduction : "customer"
+    accounts_receivable_CompanySalesInvoice ||--o{ accounts_receivable_CustomerDeduction : "invoice"
+    accounts_receivable_CustomerPayment |o--o{ accounts_receivable_CustomerDeduction : "payment"
+    document_extraction_Document ||--o{ accounts_receivable_CustomerDeduction : "source_document"
+    accounts_receivable_CustomerDeduction ||--o{ accounts_receivable_DeductionObservation : "deduction"
+    accounts_receivable_CustomerDeduction ||--o{ accounts_receivable_DeductionApplication : "deduction"
+    accounts_receivable_DeductionApplication ||--o| accounts_receivable_DeductionReversal : "application"
+```
+
+### Extraction and import provenance
+
+```mermaid
+erDiagram
+    accounts_receivable_ExtractionConfiguration {
+        int id PK
+        int customer FK
+        int database_source FK
+        int source_table FK
+        int line_source_table FK
+        int submitted_by FK
+        string target_entity
+        string source_type
+        string status
+    }
+    accounts_receivable_LLMExtractionLog {
+        int llm_log_no PK
+        int configuration FK
+        int routing_route FK
+        int customer FK
+        int purchase_order FK
+        int delivery_receipt FK
+        int sales_invoice FK
+        int payment FK
+        int fk_document_no FK
+        int source_llm_log FK
+        int reviewed_by FK
+        string target_entity
+        string source_type
+        string purpose
+        string status
+    }
+    accounts_receivable_DatabaseImportRun {
+        int id PK
+        int configuration FK
+        string request_id UK
+        json configuration_snapshot
+        string status
+    }
+    accounts_receivable_CompanyDeliveryReceipt {
+        int company_delivery_receipt_no PK
+    }
+    accounts_receivable_CompanySalesInvoice {
+        int company_sales_invoice_no PK
+    }
+    accounts_receivable_Customer {
+        int customer_no PK
+    }
+    accounts_receivable_CustomerPayment {
+        int customer_payment_no PK
+    }
+    accounts_receivable_CustomerPurchaseOrder {
+        int customer_purchase_order_no PK
+    }
+    auth_User {
+        int id PK
+    }
+    db_extraction_DatabaseSource {
+        int id PK
+    }
+    db_extraction_DatabaseTable {
+        int id PK
+    }
+    document_extraction_Document {
+        int document_no PK
+    }
+    document_extraction_LLMExtractionLog {
+        int llm_log_no PK
+    }
+    router_DocumentRoute {
+        int route_no PK
+    }
+    accounts_receivable_Customer |o--o{ accounts_receivable_ExtractionConfiguration : "customer"
+    db_extraction_DatabaseSource |o--o{ accounts_receivable_ExtractionConfiguration : "database_source"
+    db_extraction_DatabaseTable |o--o{ accounts_receivable_ExtractionConfiguration : "source_table"
+    db_extraction_DatabaseTable |o--o{ accounts_receivable_ExtractionConfiguration : "line_source_table"
+    auth_User |o--o{ accounts_receivable_ExtractionConfiguration : "submitted_by"
+    accounts_receivable_ExtractionConfiguration |o--o{ accounts_receivable_LLMExtractionLog : "configuration"
+    router_DocumentRoute |o--o{ accounts_receivable_LLMExtractionLog : "routing_route"
+    accounts_receivable_Customer |o--o{ accounts_receivable_LLMExtractionLog : "customer"
+    accounts_receivable_CustomerPurchaseOrder |o--o{ accounts_receivable_LLMExtractionLog : "purchase_order"
+    accounts_receivable_CompanyDeliveryReceipt |o--o{ accounts_receivable_LLMExtractionLog : "delivery_receipt"
+    accounts_receivable_CompanySalesInvoice |o--o{ accounts_receivable_LLMExtractionLog : "sales_invoice"
+    accounts_receivable_CustomerPayment |o--o{ accounts_receivable_LLMExtractionLog : "payment"
+    document_extraction_Document |o--o{ accounts_receivable_LLMExtractionLog : "fk_document_no"
+    document_extraction_LLMExtractionLog |o--o{ accounts_receivable_LLMExtractionLog : "source_llm_log"
+    auth_User |o--o{ accounts_receivable_LLMExtractionLog : "reviewed_by"
+    accounts_receivable_ExtractionConfiguration |o--o{ accounts_receivable_DatabaseImportRun : "configuration"
+```
+
+### Model responsibilities
+
+| Model | Responsibility |
+|---|---|
+| `Customer` | Customer master identity, credit limit and terms. |
+| `CustomerPurchaseOrder` | Customer purchase order received by the company. |
+| `CompanyDeliveryReceipt` | Company delivery evidence for a customer. |
+| `CompanySalesInvoice` | Company invoice issued to a customer. |
+| `CustomerPayment` | Customer receipt with cash, withholding and discount components. |
+| `Transaction` | Existing reconciliation case joining document sets; AP and AR are separate namespaces. |
+| `CustomerPurchaseOrderLine` | Original line identity, product/unit and quantity/price values; linked matching allocations preserve source evidence. |
+| `CompanyDeliveryReceiptLine` | Original line identity, product/unit and quantity/price values; linked matching allocations preserve source evidence. |
+| `CompanySalesInvoiceLine` | Original line identity, product/unit and quantity/price values; linked matching allocations preserve source evidence. |
+| `DocumentMatch` | One quantity allocation across invoice/order/receipt lines; split deliveries are supported. |
+| `PaymentAllocation` | Payment components allocated to one invoice. |
+| `ExtractionConfiguration` | Draft/submitted extraction or database mapping and reviewed snapshots. |
+| `LLMExtractionLog` | Provider/configuration request and response metadata, source/configuration snapshot and outcome. |
+| `DatabaseImportRun` | Local import/update request identity, configuration snapshot and outcomes. |
+| `CustomerDeduction` | Customer dispute and reviewed acceptance; acceptance alone does not settle an invoice. |
+| `DeductionObservation` | Append-only deduction decisions and application snapshots. |
+| `DeductionApplication` | Explicit application of an accepted AR deduction. |
+| `DeductionReversal` | Immutable reversal restoring the collectible balance. |
+
+For every field, delete policy, conditional constraint and index, consult
+[`models.py`](models.py) and the additive [`migrations/`](migrations/). These diagrams
+do not imply that an unmigrated database already has the same schema.
+
+## Detailed operating guide
 
 # AP and AR backend MVP
 
@@ -77,7 +518,10 @@ identifiers from metadata, and bound values. No user-entered SQL is executed.
 Each valid record saves atomically; a failed row does not erase successful rows.
 Imports save a `DatabaseImportRun` with the configuration snapshot and per-row
 outcomes. Request IDs prevent duplicate request execution. Duplicate policy can
-hold existing rows for review or skip them. Existing rows are never overwritten.
+hold existing rows for review or skip them. This legacy import action does not overwrite existing rows. The current Record First
+workflow also supports separately reviewed, signed full migrations and subsequent
+updates through `services/database_updates.py`; it revalidates the complete source
+inside one atomic local operation. See [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md).
 Database source keys are compared by connection/schema/table across snapshots.
 Use a source account with SELECT permission on the configured business tables.
 
@@ -86,7 +530,7 @@ Use a source account with SELECT permission on the configured business tables.
 PO, delivery receipt, sales invoice, and payment detail pages offer Delete record
 in both AP and AR. Confirming deletion removes the record and its line items;
 source documents and extraction attempts are retained. Records linked to a
-reconciliation case, a line match, or a payment allocation cannot be deleted
+reconciliation case, a line match, a payment allocation, or protected credit/deduction/statement history cannot be deleted
 until those links are removed. Running extraction and stale confirmations are
 also rejected. Deletion uses a CSRF-protected POST and an atomic transaction.
 
@@ -95,7 +539,7 @@ use CSRF-protected POSTs and server validation. Stale edits are rejected. Existi
 matching and settlement rules remain in each app's `services/reconciliation.py`.
 Amounts are stored and validated with Decimal. Dashboard/aging summaries select
 one currency and use the current application date. Currency conversion is not
-implemented. Only cleared payments settle invoices.
+implemented. Cleared payments, verified applied AP credits and accepted applied AR deductions settle eligible invoice balances; each component remains separately visible.
 
 Both overview dashboards show Total PO amount and Open order amount using saved
 order header totals. AP summarizes company POs; AR summarizes customer POs.
