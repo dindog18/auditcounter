@@ -1,6 +1,6 @@
 """Save accounts, reconciliation cases, matches, and allocations atomically."""
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -159,15 +159,44 @@ def save_matches(mode, record_id, data):
         raise ValidationError("Provide up to 1,000 line matches.")
     if any(not isinstance(row, dict) for row in rows):
         raise ValidationError("Each line match must be an object containing its field values.")
-    case.line_matches.all().delete()
+    # One invoice line may be fulfilled by several accepted deliveries. Validate
+    # the entire proposed allocation set before replacing the saved set.
     seen = set()
+    allocated = {}
+    invoice_model = model(mode, model(mode, "sales_invoice").__name__ + "Line")
+    invoice_ids = {row.get("invoiceLineId") for row in rows if type(row.get("invoiceLineId")) is int}
+    invoice_lines = {line.pk: line for line in invoice_model.objects.select_for_update().filter(pk__in=invoice_ids)}
     for row in rows:
         invoice_id = row.get("invoiceLineId")
-        if type(invoice_id) is not int or invoice_id in seen:
-            raise ValidationError("Choose each invoice line once.")
-        seen.add(invoice_id)
+        order_id = row.get("orderLineId")
+        receipt_id = row.get("receiptLineId")
+        if any(type(value) is not int or value <= 0 for value in (invoice_id, order_id, receipt_id)):
+            raise ValidationError("Choose an invoice, purchase order, and receipt line for each allocation.")
+        key = (invoice_id, order_id, receipt_id)
+        if key in seen:
+            raise ValidationError("Each invoice/order/receipt allocation may appear only once.")
+        seen.add(key)
+        try:
+            quantity = Decimal(str(row.get("quantity")))
+        except (InvalidOperation, ValueError, TypeError):
+            raise ValidationError("Enter a valid allocation quantity.") from None
+        if not quantity.is_finite() or quantity <= 0:
+            raise ValidationError("Every allocation needs a positive, finite quantity.")
+        invoice_line = invoice_lines.get(invoice_id)
+        if invoice_line is None or not case.sales_invoices.filter(pk=invoice_line.invoice_id).exists():
+            raise ValidationError("The invoice line must belong to this reconciliation case.")
+        allocated[invoice_id] = allocated.get(invoice_id, Decimal("0")) + quantity
+        if allocated[invoice_id] > invoice_line.quantity_invoiced:
+            raise ValidationError("Total allocations exceed the invoice line quantity.")
+        if model(mode, "DocumentMatch").objects.filter(
+            invoice_line_id=invoice_id, purchase_order_line_id=order_id,
+            delivery_receipt_line_id=receipt_id,
+        ).exclude(transaction=case).exists():
+            raise ValidationError("This invoice/order/receipt allocation is already used in another case.")
+    case.line_matches.all().delete()
+    for row in rows:
         match = model(mode, "DocumentMatch")(
-            transaction=case, invoice_line_id=invoice_id,
+            transaction=case, invoice_line_id=row["invoiceLineId"],
             purchase_order_line_id=row.get("orderLineId"), delivery_receipt_line_id=row.get("receiptLineId"),
             matched_quantity=row.get("quantity", "0"), match_status="pending")
         match.full_clean()

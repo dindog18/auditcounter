@@ -17,6 +17,17 @@ AuditCounter is a Django workspace for extracting business documents, preparing 
 - **Reviewed updates:** match prepared columns to accounting fields, validate a sample, review all matching source records, and explicitly confirm the migration or subsequent data update. Errors prevent the accounting update.
 - **Audit context:** retain extraction attempts, configuration revisions, and source identifiers alongside accounting records.
 
+### Reconciliation MVP
+
+Use **Reconciliation** in either Accounts Payable or Accounts Receivable:
+
+1. Create a case and link its purchase orders, delivery receipts, and invoices for one account and currency.
+2. Open **Match line items**. Add an allocation for each accepted delivery; the same invoice line can be split across multiple receipts.
+3. Save allocations. The backend checks linked records, ordered/accepted/invoiced quantities, item codes, unit prices, discounts, tax, and line arithmetic. The case is then marked pending, partial, matched, or exception.
+4. Review exceptions against the source documents. Payment allocation stays separate from document matching.
+
+This deliberately uses the existing AP/AR models, views, and reconciliation services on `main`. It does not require the `matching-improvements` branch's separate discrepancy and SKU-catalog apps, supplier claims, credits, statements, deductions, investigations, analytics, or AI matching. No new database migrations or login system are introduced.
+
 See the [query builder guide](auditcounter_django/accounts_receivable/QUERY_BUILDER.md) for supported transformations and the [migration guide](auditcounter_django/accounts_receivable/DATABASE_MIGRATION.md) for review and update behavior.
 
 ## Requirements

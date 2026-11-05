@@ -259,7 +259,7 @@
   }
   function caseDetail(record) {
     const docs=[['purchase-orders','orderIds','Purchase orders'],['delivery-receipts','receiptIds','Delivery receipts'],['invoices','invoiceIds','Invoices']];
-    root.insertAdjacentHTML('beforeend',`<div class="finance-kpis">${kpi('Reconciliation',label(record.status),'Document matching status','check-double')}${kpi('Discrepancy',record.discrepancy === null ? 'Review amounts' : money(record.discrepancy),'Document mismatch amount in '+record.currency,'exclamation-triangle',record.discrepancy !== null)}${kpi('Matched lines',record.matches.filter(row=>row.status==='matched').length,`${record.matches.length} invoice lines in this case`,'list')}${kpi('Currency',record.currency,'All linked documents share a currency','coins')}</div>`+
+    root.insertAdjacentHTML('beforeend',`<div class="finance-kpis">${kpi('Reconciliation',label(record.status),'Document matching status','check-double')}${kpi('Discrepancy',record.discrepancy === null ? 'Review amounts' : money(record.discrepancy),'Document mismatch amount in '+record.currency,'exclamation-triangle',record.discrepancy !== null)}${kpi('Matched allocations',record.matches.filter(row=>row.status==='matched').length,`${record.matches.length} delivery allocations in this case`,'list')}${kpi('Currency',record.currency,'All linked documents share a currency','coins')}</div>`+
       (record.status==='exception'?`<div class="finance-callout warning">${esc(record.calculationIssue || 'Document quantities, prices, or totals need review. Open line matching to inspect the discrepancy before resolving this case.')}</div>`:'')+
       `<div class="finance-grid"><div>${card('Documents in this case',`<div class="finance-card-body"><div class="finance-process" style="grid-template-columns:repeat(3,minmax(0,1fr))">${docs.map(([kind,key,title])=>`<div><h3 class="fs-10 mb-3">${title}</h3>${record[key].map(id=>{const row=find(kind,id);return `<div class="mb-3">${a(url(kind,id),esc(row.reference),'fw-semibold')}<div class="mt-2">${badge(kind==='invoices'?row.invoiceStatus:row.status)}</div></div>`;}).join('') || '<span class="text-600">No document linked</span>'}</div>`).join('')}</div></div>`)}${card('Line matches',matchSummary(record),a(url('reconciliation',record.id,'match'),'Open matching workspace '+icon('arrow-right')))}${card('Case notes',`<div class="finance-card-body">${esc(record.notes || 'No notes added.')}</div>`)}</div><aside>${card('Case details',`<div class="finance-card-body">${meta([[config.party,a(url('parties',record.partyId),esc(partyName(record)))],['Transaction date',date(record.date)],['Currency',record.currency],['Reconciled at',record.reconciledAt?date(record.reconciledAt):'Not recorded']],true)}</div>`)}<div class="finance-callout">Matching groups document lines. Payment allocation is tracked separately and determines the invoice balance.</div></aside></div>`);
   }
@@ -371,53 +371,76 @@
   function matching(record) {
     const invoiceLines=record.invoiceIds.flatMap(invoiceId=>find('invoices',invoiceId).lines.map((line,index)=>({invoiceId,index,line})));
     const options=(kind,ids,selectedId,selectedLine)=>'<option value="">Select a line</option>'+ids.flatMap(id=>find(kind,id).lines.map((line,index)=>`<option value="${id}:${index}" ${id===selectedId&&index===selectedLine?'selected':''}>${esc(find(kind,id).reference)} · ${index+1} · ${esc(line.code)} · ${kind==='delivery-receipts'?'accepted '+line.accepted:'qty '+line.quantity}</option>`)).join('');
+    const allocation=(entry,match={})=>`<tr data-allocation data-invoice-line="${entry.line.id}">
+      <td><select class="form-select" data-order aria-label="Purchase order line for ${esc(entry.line.code)}">${options('purchase-orders',record.orderIds,match.orderId,match.orderLine)}</select></td>
+      <td><select class="form-select" data-receipt aria-label="Delivery receipt line for ${esc(entry.line.code)}">${options('delivery-receipts',record.receiptIds,match.receiptId,match.receiptLine)}</select></td>
+      <td><input class="form-control finance-match-qty" data-quantity type="number" min="0.0001" max="${entry.line.quantity}" step="0.0001" value="${match.quantity ?? entry.line.quantity}" aria-label="Allocated quantity for ${esc(entry.line.code)}" required></td>
+      <td><button type="button" class="btn btn-link text-danger" data-remove aria-label="Remove allocation">Remove</button></td>
+    </tr>`;
     root.innerHTML=breadcrumb('Match '+record.reference)+heading('Match document lines',`${esc(record.reference)} · ${esc(partyName(record))} · ${esc(record.currency)}`,button(url('reconciliation',record.id),'Back to case'))+
-      '<div class="finance-callout">Link each invoice line to an order line and an accepted delivery line. Compare item codes, units, quantities, prices, tax, and discounts. Saved matches use the server’s quantity and price checks.</div>'+
-      `<form id="match-form"><div id="form-error" class="finance-form-error" role="alert" tabindex="-1" hidden></div>${card('Three-way matching',`<div class="table-responsive"><table class="table finance-table"><caption class="visually-hidden">Compare purchase order, delivery receipt, and invoice lines</caption><thead><tr><th>Invoice line</th><th>Purchase order line</th><th>Delivery receipt line</th><th>Matched qty</th><th>Result</th></tr></thead><tbody>${invoiceLines.map(({invoiceId,index,line})=>{const match=record.matches.find(row=>row.invoiceId===invoiceId&&row.invoiceLine===index);return `<tr data-match-invoice="${invoiceId}" data-match-line="${index}"><td><strong>${esc(line.code)}</strong><span class="subtext">${esc(find('invoices',invoiceId).reference)} · Line ${index+1}</span><span class="subtext">Billed ${line.quantity} ${esc(line.unit)} × PHP ${money(line.price)}</span></td><td><select class="form-select" data-order aria-label="${esc(line.code)} purchase order line">${options('purchase-orders',record.orderIds,match?.orderId,match?.orderLine)}</select></td><td><select class="form-select" data-receipt aria-label="${esc(line.code)} delivery receipt line">${options('delivery-receipts',record.receiptIds,match?.receiptId,match?.receiptLine)}</select></td><td><input class="form-control finance-match-qty" type="number" min="0" max="${line.quantity}" step="0.0001" value="${match?.quantity ?? line.quantity}" data-quantity aria-label="${esc(line.code)} matched quantity" required></td><td data-match-result></td></tr>`;}).join('')}</tbody></table></div><div class="finance-card-body border-top" id="match-summary" role="status"></div>`,a(url('reconciliation',record.id,'edit'),'Edit linked documents'))}<div class="finance-form-footer"><span class="text-600 fs-10">Discrepancies remain visible as exceptions.</span><div class="finance-actions">${button(url('reconciliation',record.id),'Cancel')}<button class="btn btn-primary" type="submit">${icon('check-double')} Save matches</button></div></div></form>`;
-    function evaluate() {
-      const usedOrders=new Map();const usedReceipts=new Map();let discrepancy=0;let amountReview=false;
-      const rows=[...root.querySelectorAll('[data-match-invoice]')].map(element=>{
-        const invoiceId=Number(element.dataset.matchInvoice);const invoiceLine=Number(element.dataset.matchLine);const invoice=find('invoices',invoiceId).lines[invoiceLine];
+      '<div class="finance-callout">Reconcile each invoice line against its purchase order and accepted delivery. Add one allocation per delivery when an invoice covers multiple receipts. The server checks quantities, item codes, prices, discounts and tax; discrepancies remain exceptions.</div>'+
+      `<form id="match-form"><div id="form-error" class="finance-form-error" role="alert" tabindex="-1" hidden></div>
+        ${invoiceLines.map(entry=>card(`${esc(entry.line.code)} · ${esc(find('invoices',entry.invoiceId).reference)} · Line ${entry.index+1}`,
+          `<div class="finance-card-body">Invoiced ${entry.line.quantity} ${esc(entry.line.unit)} × ${esc(record.currency)} ${money(entry.line.price)}
+          <div class="mt-2" data-line-summary="${entry.line.id}" role="status"></div></div>
+          <div class="table-responsive"><table class="table finance-table"><thead><tr><th>Purchase order line</th><th>Delivery receipt line</th><th>Allocated qty</th><th></th></tr></thead>
+          <tbody data-allocations="${entry.line.id}">${record.matches.filter(row=>row.invoiceId===entry.invoiceId&&row.invoiceLine===entry.index).map(match=>allocation(entry,match)).join('')}</tbody></table></div>
+          <div class="finance-card-body"><button type="button" class="btn btn-outline-primary" data-add="${entry.line.id}">Add allocation</button></div>`)).join('')}
+        <div class="finance-card-body" id="match-summary" role="status"></div>
+        <div class="finance-form-footer"><span class="text-600 fs-10">Unmatched quantities remain pending or partial. Final reconciliation status is calculated after saving.</span><div class="finance-actions">${button(url('reconciliation',record.id),'Cancel')}<button class="btn btn-primary" id="save-matches" type="submit">${icon('check-double')} Save allocations</button></div></div></form>`;
+    const form=root.querySelector('#match-form');
+    const save=form.querySelector('#save-matches');
+    function proposed() {
+      return [...form.querySelectorAll('[data-allocation]')].map(element=>{
         const [orderId,orderLine]=(element.querySelector('[data-order]').value || '').split(':').map(Number);
         const [receiptId,receiptLine]=(element.querySelector('[data-receipt]').value || '').split(':').map(Number);
-        const quantity=Number(element.querySelector('[data-quantity]').value);
-        const order=find('purchase-orders',orderId)?.lines[orderLine];const receipt=find('delivery-receipts',receiptId)?.lines[receiptLine];
-        let status='pending';let reason='Select order and receipt lines';
-        if(order&&receipt) {
-          const orderKey=`${orderId}:${orderLine}`;const receiptKey=`${receiptId}:${receiptLine}`;
-          // Other cases consume the same source quantities; the current case is replaced on save.
-          const otherMatches=data.reconciliation.filter(row=>row.id!==record.id).flatMap(row=>row.matches).filter(row=>row.status==='matched');
-          const otherOrdered=total(otherMatches.filter(row=>row.orderId===orderId&&row.orderLine===orderLine),row=>row.quantity);
-          const otherAccepted=total(otherMatches.filter(row=>row.receiptId===receiptId&&row.receiptLine===receiptLine),row=>row.quantity);
-          usedOrders.set(orderKey,(usedOrders.get(orderKey)||0)+quantity);usedReceipts.set(receiptKey,(usedReceipts.get(receiptKey)||0)+quantity);
-          const itemMismatch=invoice.code!==order.code || invoice.code!==receipt.code || invoice.unit!==order.unit || invoice.unit!==receipt.unit;
-          const priceMismatch=Math.abs(invoice.price-order.price)>.01 || Math.abs((invoice.taxRate || 0)-(order.taxRate || 0))>.0001 || Math.abs((invoice.discount/invoice.quantity)-(order.discount/order.quantity))>.01;
-          const quantityMismatch=quantity>invoice.quantity || invoice.quantity>receipt.accepted || invoice.quantity>order.quantity || usedOrders.get(orderKey)+otherOrdered>order.quantity || usedReceipts.get(receiptKey)+otherAccepted>receipt.accepted;
-          status=itemMismatch||priceMismatch||quantityMismatch?'exception':quantity<invoice.quantity?'pending':'matched';
-          reason=itemMismatch?'Item code or unit differs':priceMismatch?'Price, tax, or discount differs':quantityMismatch?'Quantity exceeds available lines':quantity<invoice.quantity?'Partially matched':'All checks passed';
-          if (!invoice.amountIssues?.length && !order.amountIssues?.length) discrepancy+=Math.max(0,invoice.quantity-Math.min(quantity,receipt.accepted))*invoice.price*(1+invoice.taxRate/100)+Math.abs(invoice.price-order.price)*quantity;
-        }
-        const amountIssues=[...(invoice.amountIssues || []),...(order?.amountIssues || [])];
-        if (amountIssues.length) { status='exception'; reason=amountIssues.join(' '); amountReview=true; }
-        element.querySelector('[data-match-result]').innerHTML=`${badge(status)}<span class="subtext">${esc(reason)}</span>`;
-        return {invoiceId,invoiceLine,orderId:orderId||null,orderLine:Number.isFinite(orderLine)?orderLine:null,receiptId:receiptId||null,receiptLine:Number.isFinite(receiptLine)?receiptLine:null,quantity,status};
+        return {invoiceLineId:Number(element.dataset.invoiceLine),
+          orderLineId:find('purchase-orders',orderId)?.lines[orderLine]?.id || null,
+          receiptLineId:find('delivery-receipts',receiptId)?.lines[receiptLine]?.id || null,
+          quantity:element.querySelector('[data-quantity]').value};
       });
-      const matched=rows.filter(row=>row.status==='matched').length;
-      const status=rows.some(row=>row.status==='exception')?'exception':rows.length&&matched===rows.length?'matched':matched>0||rows.some(row=>row.orderId&&row.receiptId&&row.quantity>0)?'partial':'pending';
-      root.querySelector('#match-summary').innerHTML=`<div class="finance-actions justify-content-between"><span>Case status ${badge(status)}</span><span>${matched} / ${rows.length} lines fully matched</span><strong>${amountReview ? 'Review source amounts' : 'Discrepancy PHP '+money(discrepancy)}</strong></div>`;
-      return {matches:rows,status,discrepancy:Math.round(discrepancy*100)/100};
     }
-    root.querySelector('#match-form').addEventListener('input',evaluate);root.querySelector('#match-form').addEventListener('change',evaluate);evaluate();
-    root.querySelector('#match-form').addEventListener('submit', async event => {
+    function evaluate() {
+      const rows=proposed(), seen=new Set();
+      let valid=rows.length<=1000;
+      let covered=0;
+      for(const entry of invoiceLines) {
+        const subset=rows.filter(row=>row.invoiceLineId===entry.line.id);
+        const quantity=subset.reduce((sum,row)=>sum+Number(row.quantity||0),0);
+        if(quantity>entry.line.quantity+0.0000001) valid=false;
+        if(subset.length && (!Number.isFinite(quantity) || quantity<=0)) valid=false;
+        if(quantity>=entry.line.quantity && entry.line.quantity>0) covered++;
+        const remaining=Math.max(0,entry.line.quantity-quantity);
+        form.querySelector(`[data-line-summary="${entry.line.id}"]`).textContent=
+          `Allocated ${quantity.toFixed(4)} / ${entry.line.quantity} · Remaining ${remaining.toFixed(4)}${quantity>entry.line.quantity?' · Exceeds invoice quantity':''}`;
+      }
+      for(const row of rows) {
+        const key=`${row.invoiceLineId}:${row.orderLineId}:${row.receiptLineId}`;
+        if(seen.has(key) || !row.orderLineId || !row.receiptLineId || !(Number(row.quantity)>0)
+          || !Number.isFinite(Number(row.quantity))) valid=false;
+        seen.add(key);
+      }
+      form.querySelector('#match-summary').textContent=
+        `${covered} / ${invoiceLines.length} invoice lines fully allocated · ${rows.length} delivery allocations. ${valid?'Save to run the server reconciliation checks.':'Complete all allocations, remove duplicates, and correct quantities before saving.'}`;
+      save.disabled=!valid;
+      return valid;
+    }
+    form.addEventListener('click',event=>{
+      const add=event.target.closest('[data-add]'), remove=event.target.closest('[data-remove]');
+      if(add) {
+        const entry=invoiceLines.find(item=>item.line.id===Number(add.dataset.add));
+        form.querySelector(`[data-allocations="${entry.line.id}"]`).insertAdjacentHTML('beforeend',allocation(entry));
+        evaluate();
+      }
+      if(remove) {remove.closest('[data-allocation]').remove();evaluate();}
+    });
+    form.addEventListener('input',evaluate);
+    form.addEventListener('change',evaluate);
+    evaluate();
+    form.addEventListener('submit', async event => {
       event.preventDefault();
-      const result=evaluate();
-      const rows=result.matches.map(row=>({
-        invoiceLineId:find('invoices',row.invoiceId).lines[row.invoiceLine].id,
-        orderLineId:find('purchase-orders',row.orderId)?.lines[row.orderLine]?.id || null,
-        receiptLineId:find('delivery-receipts',row.receiptId)?.lines[row.receiptLine]?.id || null,
-        quantity:row.quantity,
-      }));
-      try { await api.post('matches', record.id, {revision:record.matchRevision,matches:rows}); location.href=url('reconciliation',record.id); }
+      if(!evaluate() || !form.reportValidity()) return;
+      try { await api.post('matches', record.id, {revision:record.matchRevision,matches:proposed()}); location.href=url('reconciliation',record.id); }
       catch(error) { showError(error.message); }
     });
   }
