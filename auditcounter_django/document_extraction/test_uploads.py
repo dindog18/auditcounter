@@ -6,6 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pymupdf
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 
@@ -68,6 +70,15 @@ class DocumentUploadTests(TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertIn("files", response.json()["errors"])
         self.assertEqual(Batch.objects.count(), 0)
+
+    def test_pdf_without_text_returns_upload_error(self):
+        with pymupdf.open() as pdf:
+            pdf.new_page()
+            upload = SimpleUploadedFile("blank.pdf", pdf.tobytes(), content_type="application/pdf")
+        response = self.client.post("/documents/upload/", {"files": [upload]})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Use OCR", response.json()["errors"]["files"][0]["message"])
+        self.assertEqual(Document.objects.get().processing_status, "failed")
 
     def test_failed_provider_is_logged_and_success_is_retained(self):
         async def invoke(url, payload, headers):

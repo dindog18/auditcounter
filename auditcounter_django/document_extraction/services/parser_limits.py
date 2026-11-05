@@ -5,6 +5,7 @@ These checks are not a sandbox for all native parser operations.
 import struct
 import zipfile
 import zlib
+from collections import defaultdict
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile, is_zipfile
 
@@ -117,12 +118,44 @@ def check_office_archive(path, *, required=True):
         raise ValueError('Office archive is invalid or unsupported.') from error
 
 
-def pdf_edge_cost(page):
+def pdf_edge_cost(drawings):
     # Rectangles/quads expand into four edges; reserve further edges for closed
     # paths and connected graphics bounds. Count items within a single path too.
     cost = 0
-    for drawing in page.get_drawings():
+    for drawing in drawings:
         cost += 4 * len(drawing.get('items', ())) + 5
         if cost > MAX_PAGE_EDGES:
-            raise ValueError('PDF page exceeds the table-complexity limit. Split or simplify this PDF.')
+            break
     return cost
+
+def compact_pdf_grid(drawings):
+    """Merge fragmented borders drawn as thin filled rectangles."""
+    if sum(len(drawing['items']) for drawing in drawings) > MAX_DOCUMENT_EDGES:
+        return []
+    groups = defaultdict(list)
+    for drawing in drawings:
+        for item in drawing['items']:
+            if drawing['type'] != 'f' or item[0] != 're':
+                return []
+            rect = item[1]
+            if rect.width <= 1 and rect.height >= 3:
+                groups['vertical', round((rect.x0 + rect.x1) / 2)].append((rect.y0, rect.y1))
+            elif rect.height <= 1 and rect.width >= 3:
+                groups['horizontal', round((rect.y0 + rect.y1) / 2)].append((rect.x0, rect.x1))
+
+    lines = []
+    for (axis, fixed), intervals in groups.items():
+        merged = []
+        for start, end in sorted(intervals):
+            if merged and start <= merged[-1][1] + 1:
+                merged[-1][1] = max(end, merged[-1][1])
+            else:
+                merged.append([start, end])
+        for start, end in merged:
+            if axis == 'vertical':
+                lines.append(((fixed, start), (fixed, end)))
+            else:
+                lines.append(((start, fixed), (end, fixed)))
+            if 4 * len(lines) > MAX_PAGE_EDGES:
+                return []
+    return lines

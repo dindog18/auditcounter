@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from decimal import Decimal, localcontext
 from typing import TYPE_CHECKING
 
@@ -10,7 +9,13 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Sum
 
-from .amounts import line_amount_difference, line_amount_issues
+from accounting_documents.amounts import line_amount_difference, line_amount_issues
+
+from accounting_documents.services import (
+    normalize_source_key, refresh_document_cases, validate_line, validate_source,
+)
+from company_sales_invoice.services import settled_amount, validate_invoice_allocations
+from customer_payment.services import unallocated_cash, validate_payment_amounts
 
 if TYPE_CHECKING:
     from ..models import (
@@ -34,76 +39,6 @@ if TYPE_CHECKING:
 
 ZERO = Decimal("0")
 PRICE_TOLERANCE = Decimal(str(getattr(settings, "RECONCILIATION_PRICE_TOLERANCE", "0.01")))
-
-
-def normalize_source_key(key):
-    # Sorting composite keys ensures repeat imports use the same stored identity.
-    return json.loads(json.dumps(key, sort_keys=True)) if key else key
-
-
-def refresh_document_cases(document: CaseDocument) -> None:
-    # Changing a source document can invalidate an existing match.
-    for case in document.reconciliation_cases.all():
-        case.refresh_reconciliation_status()
-
-
-def validate_source(record: SourceRecord) -> None:
-    """Ensure the database table and extraction logs belong to the chosen sources."""
-    errors = {}
-    if record.source_table_id:
-        if (
-            not record.source_database_id
-            or record.source_table.schema.run.source_id != record.source_database_id
-        ):
-            errors["source_table"] = "Source table must belong to the selected database."
-        if not record.source_record_key:
-            errors["source_record_key"] = "Record key is required for a database table source."
-        elif (
-            type(record)
-            .objects.filter(
-                source_table_id=record.source_table_id, source_record_key=record.source_record_key
-            )
-            .exclude(pk=record.pk)
-            .exists()
-        ):
-            errors["source_record_key"] = "This source record was imported already."
-    for field in ("source_llm_log", "source_text_log"):
-        log = getattr(record, field)
-        if log and (
-            not record.source_document_id or log.fk_document_no_id != record.source_document_id
-        ):
-            errors[field] = "Extraction log must belong to the source document."
-    if errors:
-        raise ValidationError(errors)
-
-
-def validate_line(line: DocumentLine) -> None:
-    """Keep quantities and prices stable while a line participates in a completed match."""
-    if not line.pk or not line.matches.filter(match_status="matched").exists():
-        return
-    previous = type(line).objects.get(pk=line.pk)
-    protected = (
-        "purchase_order_id",
-        "delivery_receipt_id",
-        "invoice_id",
-        "line_no",
-        "item_code",
-        "unit_of_measure",
-        "quantity_ordered",
-        "quantity_accepted",
-        "quantity_invoiced",
-        "unit_price",
-        "discount_amount",
-        "tax_amount",
-        "line_total",
-    )
-    if any(
-        (
-            hasattr(line, name) and getattr(line, name) != getattr(previous, name)
-            for name in protected
-        )
-    ):
-        raise ValidationError("Remove existing matches before changing matched line values.")
 
 
 def validate_match(match: DocumentMatch) -> None:
@@ -268,60 +203,11 @@ def validate_allocation(allocation: PaymentAllocation) -> None:
         + allocation.cash_amount
         + allocation.withholding_tax_amount
         + allocation.discount_amount
-        > invoice.total_amount
+        > invoice.net_amount
     ):
         errors["invoice"] = "Total allocations exceed the invoice amount."
     if errors:
         raise ValidationError(errors)
-
-
-def validate_invoice_allocations(invoice: CompanySalesInvoice) -> None:
-    """Prevent reducing an invoice below the amounts already allocated to it."""
-    if invoice.pk:
-        allocations = invoice.payment_allocations.exclude(payment__payment_status="reversed")
-        allocated = sum(
-            (
-                row.cash_amount + row.withholding_tax_amount + row.discount_amount
-                for row in allocations
-            ),
-            ZERO,
-        )
-        if allocated > invoice.total_amount:
-            raise ValidationError({"total_amount": "Invoice total is below its allocations."})
-
-
-def settled_amount(invoice: CompanySalesInvoice) -> Decimal:
-    """Total the cash, withholding tax, and discounts from cleared payments."""
-    return sum(
-        (
-            allocation.cash_amount + allocation.withholding_tax_amount + allocation.discount_amount
-            for allocation in invoice.payment_allocations.select_related("payment")
-            if allocation.payment.payment_status == "cleared"
-        ),
-        ZERO,
-    )
-
-
-def validate_payment_amounts(payment: CustomerPayment) -> None:
-    """Prevent reducing payment amounts below their existing allocations."""
-    if not payment.pk:
-        return
-    for allocation_field, payment_field in (
-        ("cash_amount", "amount_received"),
-        ("withholding_tax_amount", "withholding_tax_amount"),
-        ("discount_amount", "discount_taken"),
-    ):
-        allocated = (
-            payment.invoice_allocations.aggregate(total=Sum(allocation_field))["total"] or ZERO
-        )
-        if allocated > getattr(payment, payment_field):
-            raise ValidationError({payment_field: "Payment amount is below its allocations."})
-
-
-def unallocated_cash(payment: CustomerPayment) -> Decimal:
-    """Return the cash remaining for allocation to other invoices."""
-    allocated = payment.invoice_allocations.aggregate(total=Sum("cash_amount"))["total"] or ZERO
-    return max(ZERO, payment.amount_received - allocated)
 
 
 def calculate_reconciliation(case: Transaction) -> tuple[str, Decimal]:

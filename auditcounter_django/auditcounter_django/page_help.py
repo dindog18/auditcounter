@@ -8,7 +8,7 @@ def tour(title, *steps):
 TABLE = ("#page-content table", "Read the records", "Each row is one saved record. Open its link to inspect the details.")
 SEARCH = ('#page-content input[type="search"]', "Find a record", "Type a name or reference here to narrow the list.")
 SAVE = ('#page-content form button[type="submit"]', "Save your changes", "After checking the fields, use this button to save. This tour does not submit forms.")
-NAV = (".finance-nav", "Choose a workspace page", "Use these tabs to move between records, reconciliation, extraction setup and LLM activity.")
+NAV = (".finance-nav", "Choose a workspace page", "Use these tabs to move between records, reconciliation and LLM activity. Open a record register to find its extraction setup.")
 GUIDES = {
     "setup": tour("Application setup",
         ("#page-content .alert", "Check what is missing", "Only active modules contribute to this count. Optional secret-storage steps do not block Encoder setup."),
@@ -107,7 +107,7 @@ GUIDES = {
         ("#configuration-list", "Review saved profiles", "Check target, source, scope and status. Only submitted configurations are used for extraction."),
         ('.finance-heading a[href*="configuration/new"]', "Create a configuration", "Set up a document profile for routing or a database profile for importing.")),
     "configuration_form": tour("Configure extraction",
-        (".lab-scope", "Choose the record and source", "Choose AP or AR, the record type, and document or database extraction. Each selection keeps its own working configuration."),
+        (".lab-scope", "Choose the extraction source", "Choose document or database extraction for this record type."),
         ("#setup-name", "Name the configuration", "Use a name that describes this layout or mapping. Optional scope and formatting settings apply to the selected record."),
         ("#da-source-text", "Choose the extracted text", "Choose a successful document extraction or paste text. Edit it before locking it for annotation."),
         ("#da-annotation-text", "Highlight field values", "Assign highlighted values to the matching field. Colors identify individual fields; required and optional labels remain separate."),
@@ -200,7 +200,7 @@ def for_page(request):
         elif name == "reconciliation_match":
             key = "match"
         elif name.startswith("configuration"):
-            key = "configurations" if name == "configuration_list" else "configuration_form"
+            key = "configurations" if name.endswith("_list") else "configuration_form"
         else:
             key = next((value for prefix, value in {"party": "parties", "purchase_order": "orders", "delivery_receipt": "deliveries", "invoice": "invoices", "payment": "payments", "reconciliation": "reconciliation", "aging": "aging", "llm_log": "logs", "overview": "overview"}.items() if name.startswith(prefix)), "overview")
     return GUIDES[key]

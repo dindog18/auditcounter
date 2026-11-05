@@ -17,6 +17,17 @@ def perform(request, mode, action, record_id=None):
         data = json.loads(request.body)
         if not isinstance(data, dict):
             raise ValidationError("Expected a JSON object.")
+        if action == 'po-line-review' and record_id:
+            from accounting_documents.line_review import save_review
+            case = save_review(mode, record_id, data)
+            return JsonResponse({'id': case.pk, 'status': case.status})
+        if action == 'document-po' and record_id:
+            record = records.link_purchase_order(mode, record_id, data)
+            return JsonResponse({'id': record.pk, 'purchaseOrderId': record.purchase_order_id})
+        if action == 'manual-entry':
+            from accounting_documents.manual_entry import save
+            record = save(mode, data.get('resource'), data, record_id)
+            return JsonResponse({'id': record.pk})
         if action == 'record-delete' and record_id:
             records.delete_document(mode, data.get('resource'), record_id, data)
             return JsonResponse({'deleted': True, 'id': record_id})

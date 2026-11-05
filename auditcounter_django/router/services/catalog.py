@@ -1,24 +1,26 @@
-"""Document-extraction targets supported by the accounting modules.
+"""Independent document apps supported as routing destinations.
 
-These header models match each app's ExtractionConfiguration.TargetEntity and
-accounting configuration catalog. Lines, matches, allocations, and logs belong
-to the parent workflow and are not independent routing destinations.
-Add another module here when its extraction targets are ready.
+Lines, matches, allocations, and logs remain part of the parent workflow and
+are not independent routing destinations. Existing AP/AR destinations continue
+to resolve through the accounting catalog for compatibility.
 """
 
 from django.apps import apps
 
-
 MODULES = (
     ("encoder", "Encoder", ("EncoderJob",)),
-    ("accounts_payable", "Accounts payable", (
-        "Supplier", "CompanyPurchaseOrder", "SupplierDeliveryReceipt",
-        "SupplierSalesInvoice", "CompanyPayment",
-    )),
-    ("accounts_receivable", "Accounts receivable", (
-        "Customer", "CustomerPurchaseOrder", "CompanyDeliveryReceipt",
-        "CompanySalesInvoice", "CustomerPayment",
-    )),
+    ("accounts_payable", "AP · Suppliers", ("Supplier",)),
+    ("company_purchase_order", "AP · Company purchase orders", ("CompanyPurchaseOrder",)),
+    ("supplier_delivery_receipt", "AP · Supplier delivery receipts", ("SupplierDeliveryReceipt",)),
+    ("supplier_sales_invoice", "AP · Supplier sales invoices", ("SupplierSalesInvoice",)),
+    ("company_payment", "AP · Company payments", ("CompanyPayment",)),
+    ("accounts_receivable", "AR · Customers", ("Customer",)),
+    ("customer_purchase_order", "AR · Customer purchase orders", ("CustomerPurchaseOrder",)),
+    ("company_delivery_receipt", "AR · Company delivery receipts", ("CompanyDeliveryReceipt",)),
+    ("company_sales_invoice", "AR · Company sales invoices", ("CompanySalesInvoice",)),
+    ("ap_deduction", "AP · Deductions", ("Deduction",)),
+    ("ar_deduction", "AR · Deductions", ("Deduction",)),
+    ("customer_payment", "AR · Customer payments", ("CustomerPayment",)),
 )
 
 

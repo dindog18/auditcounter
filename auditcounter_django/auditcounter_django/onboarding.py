@@ -9,7 +9,7 @@ from document_extraction.models import WorkspaceSetupPreferences, SETUP_MODULES,
 from django.core.exceptions import ImproperlyConfigured
 
 from db_extraction.credentials import credential_cipher
-from accounts_receivable.services.catalog import TARGETS
+from accounts_receivable.services.catalog import TARGETS, DOCUMENT_APPS
 from django.shortcuts import render, redirect
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
@@ -93,10 +93,11 @@ def checklist(active_modules=None):
         ready, detail = provider_check(namespace)
         step(accounting, "Configure the module LLM", ready, detail, namespace + ":configuration_list", "Open extraction setup")
         configs = apps.get_model(app, "ExtractionConfiguration").objects.filter(status="submitted").exclude(submitted_snapshot={})
-        step(accounting, "Submit an extraction configuration", configs.exists(), "Choose the target record, document or database source, field instructions or mappings, and account lookup. Save drafts, then review and submit.", namespace + ":configuration_create", "Add configuration")
+        step(accounting, "Submit an extraction configuration", configs.exists(), "Choose the target record, document or database source, field instructions or mappings, and account lookup. Save drafts, then review and submit.", namespace + ":configuration_list", "Choose record type")
         # Document routing needs a submitted document profile for each active target.
         targets = {name: key for key, name in TARGETS["ap" if app == "accounts_payable" else "ar"].items()}
-        for destination in destinations.filter(module_name=app):
+        document_apps = [DOCUMENT_APPS[name] for name in targets if name in DOCUMENT_APPS]
+        for destination in destinations.filter(module_name__in=[app, *document_apps, "ap_deduction" if app == "accounts_payable" else "ar_deduction"]):
             target = targets.get(destination.target_model)
             ready = bool(target) and configs.filter(source_type="document", target_entity=target).exists()
             step(accounting, "Document profile: " + destination.name, ready, "Submit a document configuration for this target. If several profiles match, choose one during route review. Account-specific profiles require a matching account.", namespace + ":configuration_list", "Review configurations")

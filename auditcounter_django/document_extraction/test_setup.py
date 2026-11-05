@@ -20,7 +20,7 @@ class SetupTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Application setup')
         self.assertContains(response, 'Needs setup')
-        for route in ['ROUTER:destination_create', 'ACCOUNTS_PAYABLE:configuration_create', 'ACCOUNTS_RECEIVABLE:configuration_create', 'DB_EXTRACTION:source_create']:
+        for route in ['ROUTER:destination_create', 'ACCOUNTS_PAYABLE:configuration_list', 'ACCOUNTS_RECEIVABLE:configuration_list', 'DB_EXTRACTION:source_create']:
             self.assertContains(response, reverse(route))
         response = self.client.get('/router/rules/new/')
         self.assertContains(response, 'Document routing needs setup.')

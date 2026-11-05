@@ -54,11 +54,18 @@ class RoutingFrontendTests(TestCase):
         from .services.catalog import destination_catalog
 
         catalog = destination_catalog()
-        self.assertEqual([module["value"] for module in catalog], ["encoder", "accounts_payable", "accounts_receivable"])
+        from django.apps import apps
+        from accounts_receivable.services.catalog import model
+
         self.assertEqual(catalog[0]["targets"], [{"value": "EncoderJob", "label": "Encoder job"}])
-        for module, mode in zip(catalog[1:], ("ap", "ar")):
-            self.assertEqual([target["value"] for target in module["targets"]],
-                             [target["model"] for target in configuration_catalog(mode)])
+        actual = {(module["value"], target["value"])
+                  for module in catalog[1:] for target in module["targets"]}
+        expected = {(model(mode, target["key"])._meta.app_label, target["model"])
+                    for mode in ("ap", "ar")
+                    for target in configuration_catalog(mode)}
+        self.assertEqual(actual, expected)
+        for app_label, name in actual:
+            self.assertEqual(apps.get_model(app_label, name)._meta.app_label, app_label)
         response = self.client.get(reverse("ROUTER:destination_create"))
         self.assertEqual(response.context["router_config"]["destinationCatalog"], catalog)
 
@@ -79,7 +86,7 @@ class RoutingFrontendTests(TestCase):
             for target in module["targets"]:
                 response = self.client.post(url, {"name": target["label"], "module_name": module["value"], "target_model": target["value"], "is_active": True}, content_type="application/json")
                 self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(RoutingDestination.objects.count(), 11)
+        self.assertEqual(RoutingDestination.objects.count(), 13)
 
     def test_saved_legacy_destination_can_keep_its_identity(self):
         legacy = RoutingDestination.objects.create(name="Legacy source", module_name="document_extraction", target_model="Document")

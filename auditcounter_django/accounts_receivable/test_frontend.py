@@ -1,7 +1,7 @@
 """Production workspace pages use saved records and keep AP/AR routes separate."""
 
 from django.test import TestCase
-from django.urls import NoReverseMatch, resolve, reverse
+from django.urls import resolve, reverse
 
 
 class AccountingFrontendTests(TestCase):
@@ -42,7 +42,7 @@ class AccountingFrontendTests(TestCase):
                 self.assertEqual(config["mode"], mode)
                 self.assertIsNone(config["recordId"])
                 self.assertEqual(config["screen"], "list")
-                self.assertFalse(config["canEncode"])
+                self.assertTrue(config["canEncode"])
                 self.assertTrue(config["routes"]["parties"].endswith(f"/{slug}/"))
                 for route in config["routes"].values():
                     self.assertEqual(resolve(route).namespace, namespace)
@@ -51,17 +51,18 @@ class AccountingFrontendTests(TestCase):
                 self.assertContains(response, reverse(f"{self.namespaces[0]}:overview"))
                 self.assertContains(response, reverse(f"{self.namespaces[1]}:overview"))
 
-    def test_extracted_records_have_no_encoding_routes(self):
+    def test_all_document_types_have_manual_entry_routes(self):
         for namespace in self.namespaces:
             for name in ("purchase_order", "delivery_receipt", "invoice", "payment"):
-                endpoint = reverse(f"{namespace}:{name}_list")
-                for path in (endpoint + "new/", endpoint + "1/edit/"):
-                    with self.subTest(namespace=namespace, path=path):
-                        self.assertEqual(self.client.get(path).status_code, 404)
-                for action in ("create", "edit"):
-                    with self.subTest(namespace=namespace, name=name, action=action):
-                        with self.assertRaises(NoReverseMatch):
-                            reverse(f"{namespace}:{name}_{action}", args=[1] if action == "edit" else [])
+                with self.subTest(namespace=namespace, name=name):
+                    endpoint = reverse(f"{namespace}:{name}_create")
+                    response = self.client.get(endpoint)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertTrue(response.context["finance_config"]["canEncode"])
+                    self.assertIn("manualEntry", response.context["finance_config"])
+                    self.assertContains(response, 'accounting/manual-entry.js')
+                    self.assertEqual(self.client.post(endpoint).status_code, 405)
+                    self.assertEqual(self.client.get(reverse(f"{namespace}:{name}_edit", args=[999])).status_code, 404)
 
     def test_accounts_and_reconciliation_remain_editable(self):
         for namespace in self.namespaces:

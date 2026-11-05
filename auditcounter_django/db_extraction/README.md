@@ -116,3 +116,9 @@ Catalog implementation references:
 [PostgreSQL catalogs](https://www.postgresql.org/docs/current/catalogs.html),
 [constraints](https://www.postgresql.org/docs/current/catalog-pg-constraint.html),
 [Psycopg connections](https://www.psycopg.org/psycopg3/docs/api/connections.html).
+
+## Accounting document apps
+
+Accounting documents now live in independent AP and AR Django apps. See the
+[document app architecture and migration guide](../../docs/accounting-document-apps.md)
+for model ownership, compatibility and migration details.

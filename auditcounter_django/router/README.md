@@ -116,3 +116,9 @@ Past rule snapshots, routes, source documents and AP/AR or Encoder records are
 retained. Deleted destinations are kept as inactive historical references, hidden
 from configuration, and cannot be re-enabled or edited through the UI. A new
 destination for the same module/model may be created with a fresh identity.
+
+## Accounting document apps
+
+Accounting documents now live in independent AP and AR Django apps. See the
+[document app architecture and migration guide](../../docs/accounting-document-apps.md)
+for model ownership, compatibility and migration details.

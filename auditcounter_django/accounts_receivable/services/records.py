@@ -30,14 +30,17 @@ def delete_document(mode, resource, record_id, data):
     for relation in ('reconciliation_cases', 'payment_allocations', 'invoice_allocations'):
         if hasattr(record, relation) and getattr(record, relation).exists():
             raise ValidationError('This record is linked to reconciliation or payment allocations. Remove those links before deleting.')
-    logs = model(mode, 'LLMExtractionLog').objects.select_for_update().filter(**{target: record})
+    if target == 'deduction' and record.status == 'applied':
+        raise ValidationError('Cancel the deduction before deleting it.')
+    logs = model(mode, 'LLMExtractionLog').objects.select_for_update().filter(**{target: record}) if target != 'deduction' else model(mode, 'LLMExtractionLog').objects.none()
     if any(log.status in {'queued', 'processing'} for log in logs):
         raise ValidationError('Extraction is still running for this record. Wait before deleting.')
     try:
         # Nullable protected references preserve attempts and their original
         # provider output when the resulting accounting record is removed.
-        logs.update(**{target: None})
-        if target != 'payment':
+        if target != 'deduction':
+            logs.update(**{target: None})
+        if target not in {'payment', 'deduction'}:
             record.lines.all().delete()
         record.delete()
     except ProtectedError as error:
@@ -180,3 +183,37 @@ def save_matches(mode, record_id, data):
         match.save()
     case.refresh_reconciliation_status()
     return case
+
+
+@transaction.atomic
+def link_purchase_order(mode, record_id, data):
+    """Link existing manual or source-backed DR/SI records without re-encoding them."""
+    resource = data.get('resource')
+    if resource not in {'delivery-receipts', 'invoices'}:
+        raise ValidationError('Choose a delivery receipt or invoice to link to a PO.')
+    if set(data) - {'resource', 'purchaseOrderId', 'revision'}:
+        raise ValidationError('Only the PO link may be changed with this action.')
+    order_id = data.get('purchaseOrderId')
+    if 'purchaseOrderId' not in data or order_id is not None and (type(order_id) is not int or order_id <= 0):
+        raise ValidationError('Choose a valid PO or explicitly clear the link.')
+    target, key = RESOURCES[resource], party_key(mode)
+    Target = model(mode, target)
+    initial = get_object_or_404(Target, pk=record_id)
+    account_id = getattr(initial, key+'_id')
+    if account_id:
+        model(mode, key).objects.select_for_update().get(pk=account_id)
+    record = get_object_or_404(Target.objects.select_for_update(), pk=record_id)
+    check_revision(record, data.get('revision'))
+    if model(mode, 'LLMExtractionLog').objects.filter(**{target: record}, status__in=['queued', 'processing']).exists():
+        raise ValidationError('Extraction is still running. Wait before changing the PO link.')
+    if order_id is not None:
+        order = get_object_or_404(model(mode, 'purchase_order'), pk=order_id)
+        if getattr(order, key+'_id') != getattr(record, key+'_id'):
+            raise ValidationError('The PO must belong to the same account.')
+        if hasattr(record, 'currency') and order.currency != record.currency:
+            raise ValidationError('The PO and invoice must use the same currency.')
+        record.purchase_order = order
+    else:
+        record.purchase_order = None
+    record.save(update_fields=['purchase_order', 'updated_at'])
+    return record

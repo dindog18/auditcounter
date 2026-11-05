@@ -3,8 +3,8 @@
 # AP and AR backend MVP
 
 The accounting workspaces read and write Django records. They do not load demo
-fixtures or browser storage. AP and AR keep separate models and reconciliation
-rules. Their identical workspace operations share small services in
+fixtures or browser storage. AP and AR keep separate document apps and reconciliation
+rules. See the [document app architecture and migration guide](../../docs/accounting-document-apps.md). Their identical workspace operations share small services in
 `accounts_receivable/services/`; each function receives `ap` or `ar` explicitly.
 
 ## Document workflow
@@ -26,8 +26,8 @@ independently. Unknown accounts, missing required fields, ambiguous output,
 invalid lines, or inconsistent totals fail without saving partial records. The
 provider response remains in LLM activity. Fix the configuration/source and retry.
 Completed routes are idempotent. A new route cannot silently re-create an already
-processed document/target or overwrite an existing reference. Existing accounting
-records stay read-only in the extraction registers.
+processed document/target or overwrite an existing reference. Source-backed accounting
+records retain their extraction workflow. Manual entries can be created and edited in each document register.
 
 AP/AR setup tests and final extraction saves check each order/invoice line against
 quantity × unit price − discount + tax, rounded to cents using half-up rounding.
@@ -107,8 +107,10 @@ only on purchase orders.
 
 ## Files
 
-- `models.py`, `migrations/`: plain models and schema changes.
-- `services/reconciliation.py`: existing module-specific business rules.
+- Document apps: document headers, their lines, validation and persistence rules.
+- Workflow `models.py`, `migrations/`: accounts, reconciliation and extraction history; compatibility document imports remain available.
+- `services/reconciliation.py`: module-specific cross-document reconciliation rules.
+- `accounting_documents/`: common provenance, matched-line and monetary helpers.
 - Shared `services/catalog.py`: explicit AP/AR model map and field allowlist.
 - Shared `services/configuration.py`: draft validation, submission and snapshots.
 - Shared `services/llm.py`, `assistant.py`: provider calls, logs and proposals.
@@ -253,3 +255,9 @@ Shared JSON actions under each module's `/api/` prefix:
 
 Validate using `python manage.py test accounts_receivable.test_configuration_chat
 accounts_receivable.test_backend`. Tests use mocked providers and a disposable DB.
+
+## PO reconciliation and deductions
+
+Use **Reconciliation** for the automatic PO-led workflow and **Deductions** for
+Defective, Pull Out, Support, Credit Memo, and other adjustments. See the
+[workflow and migration guide](../../docs/accounting-reconciliation.md).

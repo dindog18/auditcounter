@@ -10,6 +10,7 @@ from .models import DocExtractionLog, LLMExtractionLog
 from .services import management, pages
 from .services.originals import original_file_response
 from .forms import DocumentUploadForm
+from .services.documents import PDFExtractionError
 from .services.uploads import process_document_upload
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,10 @@ def document_upload(request: HttpRequest) -> HttpResponse:
         if not form.is_valid():
             logger.warning("document_upload validation failed fields=%s", ",".join(form.errors))
             return JsonResponse({"errors": form.errors.get_json_data()}, status=400)
-        batch = process_document_upload(form.cleaned_data["files"])
+        try:
+            batch = process_document_upload(form.cleaned_data["files"])
+        except PDFExtractionError as error:
+            return JsonResponse({"errors": {"files": [{"message": str(error)}]}}, status=400)
         logger.info("batch=%s document_upload redirecting to batch detail", batch.batch_no)
         return redirect("DOC_EXTRACTION:batch_detail", batch_no=batch.batch_no)
     return render(request, "document_extraction/document_upload.html", {

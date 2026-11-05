@@ -5,6 +5,7 @@ from django.apps import apps
 
 from .models import RoutingDestination, RoutingRule
 from .services.catalog import destination_catalog
+from accounts_receivable.services.catalog import MODULES, TARGETS, accounting_mode, model as accounting_model
 
 
 class DestinationForm(forms.ModelForm):
@@ -18,6 +19,10 @@ class DestinationForm(forms.ModelForm):
         module_name = self.data.get("module_name", "") if self.is_bound else self.instance.module_name
         targets = next((module["targets"] for module in catalog if module["value"] == module_name), [])
         models = [(target["value"], target["label"]) for target in targets]
+        # Existing integrations can still post the original AP/AR workflow names.
+        mode = next((key for key, app in MODULES.items() if app == module_name), None)
+        if self.is_bound and mode:
+            models = [(name, name) for name in TARGETS[mode].values()]
         # Keep an existing destination editable if its module is outside today's catalog.
         # New destinations and retargeting still have to use the supported options.
         if self.instance.pk:
@@ -37,7 +42,8 @@ class DestinationForm(forms.ModelForm):
         module, target = data.get("module_name"), data.get("target_model")
         if module and target:
             try:
-                model = apps.get_model(module, target)
+                mode = accounting_mode(module, target)
+                model = accounting_model(mode, target) if mode else apps.get_model(module, target)
             except LookupError:
                 model = None
             if model is None:

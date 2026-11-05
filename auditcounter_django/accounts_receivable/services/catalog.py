@@ -10,16 +10,54 @@ from django.core.serializers.json import DjangoJSONEncoder
 MODULES = {"ap": "accounts_payable", "ar": "accounts_receivable"}
 TARGETS = {
     "ap": {"supplier": "Supplier", "purchase_order": "CompanyPurchaseOrder",
-           "delivery_receipt": "SupplierDeliveryReceipt", "sales_invoice": "SupplierSalesInvoice", "payment": "CompanyPayment"},
+           "delivery_receipt": "SupplierDeliveryReceipt", "sales_invoice": "SupplierSalesInvoice", "payment": "CompanyPayment", "deduction": "Deduction"},
     "ar": {"customer": "Customer", "purchase_order": "CustomerPurchaseOrder",
-           "delivery_receipt": "CompanyDeliveryReceipt", "sales_invoice": "CompanySalesInvoice", "payment": "CustomerPayment"},
+           "delivery_receipt": "CompanyDeliveryReceipt", "sales_invoice": "CompanySalesInvoice", "payment": "CustomerPayment", "deduction": "Deduction"},
 }
+DOCUMENT_APPS = {
+    "CompanyPurchaseOrder": "company_purchase_order",
+    "CompanyPurchaseOrderLine": "company_purchase_order",
+    "SupplierDeliveryReceipt": "supplier_delivery_receipt",
+    "SupplierDeliveryReceiptLine": "supplier_delivery_receipt",
+    "SupplierSalesInvoice": "supplier_sales_invoice",
+    "SupplierSalesInvoiceLine": "supplier_sales_invoice",
+    "CompanyPayment": "company_payment",
+    "CustomerPurchaseOrder": "customer_purchase_order",
+    "CustomerPurchaseOrderLine": "customer_purchase_order",
+    "CompanyDeliveryReceipt": "company_delivery_receipt",
+    "CompanyDeliveryReceiptLine": "company_delivery_receipt",
+    "CompanySalesInvoice": "company_sales_invoice",
+    "CompanySalesInvoiceLine": "company_sales_invoice",
+    "CustomerPayment": "customer_payment",
+}
+
 RESOURCES = {"purchase-orders": "purchase_order", "delivery-receipts": "delivery_receipt",
-             "invoices": "sales_invoice", "payments": "payment"}
+             "invoices": "sales_invoice", "payments": "payment", "deductions": "deduction"}
 
 
 def model(mode, name):
-    return apps.get_model(MODULES[mode], TARGETS[mode].get(name, name))
+    if name in {'deduction', 'Deduction'}:
+        return apps.get_model(mode + '_deduction', 'Deduction')
+    if name == 'POReconciliation':
+        return apps.get_model(mode + '_recon', 'Reconciliation')
+    model_name = TARGETS[mode].get(name, name)
+    app_label = DOCUMENT_APPS.get(model_name, MODULES[mode])
+    # Reject a document from the other workflow even when requested by class name.
+    allowed = set(TARGETS[mode].values())
+    if model_name in DOCUMENT_APPS and model_name.removesuffix("Line") not in allowed:
+        raise LookupError(f"{model_name} does not belong to {mode.upper()}.")
+    return apps.get_model(app_label, model_name)
+
+
+def accounting_mode(app_label, model_name=None):
+    """Resolve document owners and the persisted AP/AR workflow names."""
+    for mode, workflow in MODULES.items():
+        if app_label == workflow or (app_label == mode + "_deduction" and model_name in (None, "Deduction")):
+            return mode
+        for name in TARGETS[mode].values():
+            if DOCUMENT_APPS.get(name) == app_label and model_name in (None, name):
+                return mode
+    return None
 
 
 def party_key(mode):
@@ -49,6 +87,7 @@ def required_fields(mode, target, lines=False):
                 if not field.blank and not field.null and not field.has_default()}
     if not lines and target not in {'customer', 'supplier'}:
         essential = {
+            'deduction': {'reference_no', 'deduction_date', 'purchase_order', 'currency', 'amount', 'category'},
             'purchase_order': {'po_reference_no', 'order_date', 'currency', 'total_amount'},
             'delivery_receipt': {'dr_reference_no', 'delivery_date'},
             'sales_invoice': {'invoice_reference_no', 'invoice_date', 'currency', 'total_amount'},

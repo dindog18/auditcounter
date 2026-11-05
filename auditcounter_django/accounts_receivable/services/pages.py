@@ -13,6 +13,7 @@ from .amounts import line_amount_issues
 from .catalog import model, party_key, RESOURCES, revision
 from .configuration import snapshot
 from .records import allocations, case_membership, matches
+from accounting_documents.manual_entry import is_manual
 
 
 def number(value):
@@ -49,10 +50,16 @@ def line(row):
 
 
 def document(row, target, mode):
+    if target == 'deduction':
+        return {'id': row.pk, 'reference': row.reference_no, 'partyId': getattr(row, party_key(mode)+'_id'),
+                'date': text_date(row.deduction_date), 'currency': row.currency, 'amount': number(row.amount),
+                'status': row.status, 'category': row.get_category_display(), 'description': row.description,
+                'notes': row.notes, 'source': 'document' if row.source_document_id else 'database' if row.source_database_id else 'manual', 'isManual': is_manual(row), 'lines': [],
+                'purchaseOrderId': row.purchase_order_id, 'invoiceId': row.invoice_id, 'revision': revision(row)}
     ref = {"purchase_order": "po_reference_no", "delivery_receipt": "dr_reference_no", "sales_invoice": "invoice_reference_no", "payment": "payment_reference_no"}[target]
     date = {"purchase_order": "order_date", "delivery_receipt": "delivery_date", "sales_invoice": "invoice_date", "payment": "payment_date"}[target]
     status = {"purchase_order": "status", "delivery_receipt": "delivery_status" if mode == "ar" else "receipt_status", "sales_invoice": "payment_status", "payment": "payment_status"}[target]
-    source = "document" if row.source_document_id else "database" if row.source_database_id else ""
+    source = "document" if row.source_document_id else "database" if row.source_database_id else "manual" if is_manual(row) else ""
     result = {"id": row.pk, "reference": getattr(row, ref) or f"#{row.pk}", "partyId": getattr(row, party_key(mode)+"_id"),
               "date": text_date(getattr(row, date)), "currency": getattr(row, "currency", ""), "status": getattr(row, status),
               "amount": number(getattr(row, "total_amount", getattr(row, "amount_received" if mode == "ar" else "amount_paid", 0))),
@@ -65,7 +72,8 @@ def document(row, target, mode):
               "discountTaken": number(getattr(row, "discount_taken", 0)), "method": getattr(row, "payment_method", ""),
               "bankReference": getattr(row, "bank_reference_no", ""), "postingDate": text_date(getattr(row, "posting_date", None)),
               "clearedAt": text_date(getattr(row, "cleared_at", None)), "reversedAt": text_date(getattr(row, "reversed_at", None)),
-              "reversalReason": getattr(row, "reversal_reason", ""), "notes": getattr(row, "notes", ""),
+              "reversalReason": getattr(row, "reversal_reason", ""), "notes": getattr(row, "notes", next((getattr(row, field.name) for field in row._meta.fields if field.name.endswith("_context")), "")),
+              "isManual": is_manual(row), "purchaseOrderId": getattr(row, "purchase_order_id", None),
               "source": source, "sourceName": row.source_document.file_name if row.source_document_id else f"{row.source_table.schema.name}.{row.source_table.name}" if row.source_table_id else "",
               "sourceUrl": f"/documents/{row.source_document_id}/" if row.source_document_id else f"/databases/{row.source_database_id}/" if row.source_database_id else "/documents/",
               "databaseName": row.source_database.name if row.source_database_id else "", "sourceKey": json.dumps(row.source_record_key),
@@ -73,6 +81,8 @@ def document(row, target, mode):
               "lines": [line(item) for item in row.lines.order_by("line_no", "pk")] if target != "payment" else [],
               "revision": revision(row, allocations(row)) if target == "payment" else revision(row)}
     if target == "sales_invoice":
+        result["deductionAmount"] = number(row.deduction_amount)
+        result["netAmount"] = number(row.net_amount)
         result["settled"] = number(row.settled_amount)
         result["balance"] = number(row.outstanding_balance)
     return result
@@ -100,12 +110,15 @@ def llm_log(row):
     return result
 
 
-def workspace_state(mode, resource):
+def workspace_state(mode, resource, record_id=None, setup_target=None):
     state = {"parties": [party(row, mode) for row in model(mode, party_key(mode)).objects.all()], "today": timezone.localdate().isoformat()}
     if resource == "configuration":
         from document_extraction.models import DocExtractionLog
         state["sample_documents"] = list(DocExtractionLog.objects.exclude(markdown_text="").order_by("-pk").values("pk", "fk_document_no__file_name")[:50])
-        state["profiles"] = [configuration(row, mode) for row in model(mode, "ExtractionConfiguration").objects.all()]
+        profiles = model(mode, "ExtractionConfiguration").objects.all()
+        if setup_target:
+            profiles = profiles.filter(target_entity=setup_target)
+        state["profiles"] = [configuration(row, mode) for row in profiles]
         state["import_runs"] = list(model(mode, "DatabaseImportRun").objects.values("id", "configuration_id", "status", "result", "created_at")[:50])
         state["sources"] = list(DatabaseSource.objects.filter(enabled=True).values("id", "name"))
         state["tables"] = [{"id": row.pk, "source_id": row.schema.run.source_id, "label": f"{row.schema.name}.{row.name} · snapshot #{row.schema.run_id}", "name": f"{row.schema.name}.{row.name}", "columns": list(row.columns.values_list("name", flat=True))} for row in DatabaseTable.objects.filter(schema__run__status="completed").select_related("schema__run").prefetch_related("columns")]
@@ -114,8 +127,28 @@ def workspace_state(mode, resource):
         state["logs"] = [llm_log(row) for row in model(mode, "LLMExtractionLog").objects.select_related("configuration", "fk_document_no").all()]
         return state
     for resource_name, target in RESOURCES.items():
-        rows = model(mode, target).objects.select_related("source_document", "source_database", "source_table__schema")
+        rows = model(mode, target).objects.all()
+        if target != "deduction":
+            rows = rows.select_related("source_document", "source_database", "source_table__schema")
         state[resource_name] = [document(row, target, mode) for row in rows]
+    from accounting_documents.reconciliation import calculate
+
+    state['po-reconciliation'] = []
+    for case in model(mode, 'POReconciliation').objects.select_related('purchase_order'):
+        order = case.purchase_order
+        show_summary = resource == 'po-reconciliation' and record_id in (None, case.pk)
+        summary = calculate(order, mode, details=record_id == case.pk) if show_summary else {}
+        state['po-reconciliation'].append({
+            'id': case.pk, 'orderId': order.pk, 'reference': order.po_reference_no,
+            'partyId': getattr(order, party_key(mode)+'_id'), 'currency': order.currency,
+            'status': case.status, 'date': text_date(order.order_date), 'issues': case.issues,
+            **{name: number(getattr(case, name)) for name in ['invoice_total','deduction_total','net_due','payment_total','outstanding','difference']},
+            'receiptIds': list(order.delivery_receipts.values_list('pk', flat=True)),
+            'invoiceIds': list(order.sales_invoices.values_list('pk', flat=True)),
+            'deductionIds': list(order.deductions.values_list('pk', flat=True)),
+            **summary,
+            'revision': revision(case) if resource == 'po-reconciliation' and case.pk == record_id else None,
+        })
     state["allocations"] = [{"paymentId": row.payment_id, "invoiceId": row.invoice_id, "cash": number(row.cash_amount), "withholding": number(row.withholding_tax_amount), "discount": number(row.discount_amount)} for row in model(mode, "PaymentAllocation").objects.all()]
     indexes = {key: {line["id"]: (row["id"], index) for row in state[key] for index, line in enumerate(row["lines"])} for key in ("purchase-orders", "delivery-receipts", "invoices")}
     amount_issues = {key: {line["id"]: line["amountIssues"] for row in state[key] for line in row["lines"]}
