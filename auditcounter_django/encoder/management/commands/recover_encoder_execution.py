@@ -7,7 +7,7 @@ from encoder.models import EncoderExecution, EncoderJob
 
 
 class Command(BaseCommand):
-    help = "Mark an interrupted Encoder execution as unknown after confirming its process stopped."
+    help = "Mark an interrupted MCP Encoder execution as unknown after confirming its process stopped."
 
     def add_arguments(self, parser):
         parser.add_argument("execution_id", type=int)
@@ -30,4 +30,4 @@ class Command(BaseCommand):
             attempt.save(update_fields=["status", "error_message", "finished_at"])
             job.status, job.last_error = "failed", attempt.error_message
             job.save(update_fields=["status", "last_error", "updated_at"])
-        self.stdout.write("Marked as unknown. No external operation was called. Review and reconcile in Encoder before retrying.")
+        self.stdout.write("Marked as unknown. No external operation was called. Review and reconcile in MCP Encoder before retrying.")

@@ -74,7 +74,7 @@ class EncoderJob(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-pk"]
-        verbose_name = "Encoder job"
+        verbose_name = "MCP Encoder job"
 
     @property
     def document(self):

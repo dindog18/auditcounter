@@ -13,7 +13,7 @@ flowchart TD
     Documents --> Extract[Extract and review text]
     Extract --> Route[Route document to one or more destinations]
     Route -->|AP or AR| DocAccounting[Extract structured accounting record]
-    Route -->|Encoder| Encoder[Prepare and review MCP tool payload]
+    Route -->|MCP Encoder| MCP Encoder[Prepare and review MCP tool payload]
     Database --> Mapping[Build query and map source fields]
     Mapping --> Review[Preview, full validation and user confirmation]
     Review --> Local[(AuditCounter application database)]
@@ -30,13 +30,13 @@ flowchart TD
     Findings --> Investigate[Review findings, investigate and record decisions]
     Investigate --> Actions[Claims, credits, statements, deductions and root causes]
     Actions --> Reports[Dashboards, aging and analytics]
-    Encoder -->|Explicit confirmation| External[Permitted external MCP operation]
+    MCP Encoder -->|Explicit confirmation| External[Permitted external MCP operation]
     Local --> History[Source links, extraction logs, configuration snapshots and timeline]
     Route --> History
     Investigate --> History
 ```
 
-AuditCounter maintains its **own application database**, distinct from any PostgreSQL source or external system. Documents and external database records are alternative ways to populate accounting records; either can be used without the other. AP and AR have separate models and rules, but share parts of the interface and service layer. The Router can send a document to more than one independent destination. The optional Encoder is a separate external-write path, not a prerequisite for reconciliation.
+AuditCounter maintains its **own application database**, distinct from any PostgreSQL source or external system. Documents and external database records are alternative ways to populate accounting records; either can be used without the other. AP and AR have separate models and rules, but share parts of the interface and service layer. The Router can send a document to more than one independent destination. The optional MCP Encoder is a separate external-write path, not a prerequisite for reconciliation.
 
 ## 2. Document intake, extraction and routing
 
@@ -69,7 +69,7 @@ flowchart TD
     Choose --> Validate
     Validate -->|Valid| Record[Save header and optional lines atomically]
     Validate -->|Invalid| Fail[Save attempt and errors; no partial accounting record]
-    APAR -->|Encoder| Prepare[Create Encoder job and prepare payload]
+    APAR -->|MCP Encoder| Prepare[Create MCP Encoder job and prepare payload]
     Record --> Human[Route review remains a separate human decision]
     Fail --> Fix
 ```
@@ -230,11 +230,11 @@ flowchart TD
 
 Duplicate detection is conservative: it compares normalized references and dates within three days for invoices with the same party, currency and recorded total. It may miss other duplicates and does not automatically delete anything. Claims and correspondence are manual; the application does not send email. Claim closure needs supported evidence. Analytics distinguish historical finding confirmations, current reviewed root causes, case differences and applied adjustments; they do not infer cash recoveries or sum individual findings as independent losses.
 
-## 8. Optional Encoder and external operation
+## 8. Optional MCP Encoder and external operation
 
 ```mermaid
 flowchart TD
-    Route[Router sends a document to an Encoder destination] --> Job[Create job with connection and permitted operation snapshot]
+    Route[Router sends a document to an MCP Encoder destination] --> Job[Create job with connection and permitted operation snapshot]
     Job --> Discover[Inspect tool schema and choose reusable mapping]
     Discover --> Draft[Prepare payload from source extraction]
     Draft --> Missing{Missing or invalid values?}
@@ -254,7 +254,7 @@ flowchart TD
     Unknown -->|No| Done[Review result]
 ```
 
-Encoder is disabled by default and documented as a trusted loopback development MVP. It can prepare and validate data without executing an external operation. AI suggestions must be inspected and applied explicitly; execution requires approvals and explicit payload confirmation. If the external outcome is uncertain, inspect the external system before retrying. See the [Encoder guide](../auditcounter_django/encoder/README.md).
+MCP Encoder is disabled by default and documented as a trusted loopback development MVP. It can prepare and validate data without executing an external operation. AI suggestions must be inspected and applied explicitly; execution requires approvals and explicit payload confirmation. If the external outcome is uncertain, inspect the external system before retrying. See the [MCP Encoder guide](../auditcounter_django/encoder/README.md).
 
 ## Practical example
 
@@ -269,4 +269,4 @@ Encoder is disabled by default and documented as a trusted loopback development 
 - Provider calls, reviews and imports can run within web requests; the project documentation describes no background queue or automatic retry. Large operations need suitable timeouts.
 - The README states that the workspaces do not provide application-level authentication or organization isolation. Restrict access at the hosting layer.
 - Several newer workflows are present in the current workspace and require their corresponding migrations on the target application database. This guide does not assert that they are deployed or enabled.
-- Key implementation references: [document routing](../auditcounter_django/router/README.md), [AP/AR workflow](../auditcounter_django/accounts_receivable/README.md), [database migration](../auditcounter_django/accounts_receivable/DATABASE_MIGRATION.md), [Encoder](../auditcounter_django/encoder/README.md), and [new workflow implementation report](mvp-implementation-report.md).
+- Key implementation references: [document routing](../auditcounter_django/router/README.md), [AP/AR workflow](../auditcounter_django/accounts_receivable/README.md), [database migration](../auditcounter_django/accounts_receivable/DATABASE_MIGRATION.md), [MCP Encoder](../auditcounter_django/encoder/README.md), and [new workflow implementation report](mvp-implementation-report.md).

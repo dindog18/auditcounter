@@ -87,7 +87,7 @@ def _register(request: ExecutionRequest, config):
         if DocumentRoute.objects.filter(routing_log__source_document_id__in=ids, processing_status="processing").exists():
             raise ValidationError("Wait for AP/AR extraction to finish before rerunning routing.")
         if DocumentRoute.objects.filter(routing_log__source_document_id__in=ids, encoder_job__status="processing").exists():
-            raise ValidationError("Wait for Encoder execution to finish before rerunning routing.")
+            raise ValidationError("Wait for MCP Encoder execution to finish before rerunning routing.")
         rules = rule_snapshot()
         if not rules:
             raise ValidationError("Add an active routing destination and an active routing rule before running documents.")
@@ -117,7 +117,7 @@ def encoder_configuration(snapshot, destination_id, rule_id=None):
     if not presets:
         return {}
     if len(presets) != 1:
-        return {"error": "The router did not identify one matching Encoder rule. Review the rules and rerun routing to select its MCP operation."}
+        return {"error": "The router did not identify one matching MCP Encoder rule. Review the rules and rerun routing to select its MCP operation."}
     connection, tool = presets.pop()
     return {"connection_id": connection, "tool_name": tool, "rule_id": rule_id} if connection or tool else {}
 

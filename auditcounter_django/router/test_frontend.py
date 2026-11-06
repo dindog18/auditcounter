@@ -57,7 +57,7 @@ class RoutingFrontendTests(TestCase):
         from django.apps import apps
         from accounts_receivable.services.catalog import model
 
-        self.assertEqual(catalog[0]["targets"], [{"value": "EncoderJob", "label": "Encoder job"}])
+        self.assertEqual(catalog[0]["targets"], [{"value": "EncoderJob", "label": "MCP Encoder job"}])
         actual = {(module["value"], target["value"])
                   for module in catalog[1:] for target in module["targets"]}
         expected = {(model(mode, target["key"])._meta.app_label, target["model"])

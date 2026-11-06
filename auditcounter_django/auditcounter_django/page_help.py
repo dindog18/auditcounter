@@ -10,10 +10,16 @@ SEARCH = ('#page-content input[type="search"]', "Find a record", "Type a name or
 SAVE = ('#page-content form button[type="submit"]', "Save your changes", "After checking the fields, use this button to save. This tour does not submit forms.")
 NAV = (".finance-nav", "Choose a workspace page", "Use these tabs to move between records, reconciliation and LLM activity. Open a record register to find its extraction setup.")
 GUIDES = {
+    "guided_setup": tour("Guided setup",
+        ("#setup-preview-title", "Start or resume setup", "Guided Setup walks you through configuring the workflows you select. Settings & setup is where you review workspace status and manage reminders."),
+        ("#setup-preview [data-progress]", "See your steps", "The list adapts to your workflow and record choices. Use Back to change an earlier choice. You can select Accounts Payable, Accounts Receivable, MCP Encoder, or any combination."),
+        ("#setup-preview [data-panel]", "Configure the current step", "Follow the links to configure MCP Encoder or PostgreSQL when selected. For each accounting record, choose Document, PostgreSQL when enabled, or Manual entry. Mark an issued document if it should be routed."),
+        ("#setup-preview [data-actions]", "Recheck and continue", "Setup links open in a new tab. Save your changes there, return here, and use Recheck setup when available to refresh the saved configuration checks. Mark the step ready or done, then continue. The review lists any unfinished or skipped steps."),
+        ("#setup-preview [data-progress-note]", "Resume in this browser", "The wizard saves your choices and progress in this browser. Open Guided Setup again to resume. On the review step, choose Finish setup when you are ready, then Open workspace.")),
     "setup": tour("Application setup",
-        ("#page-content .alert", "Check what is missing", "Only active modules contribute to this count. Optional secret-storage steps do not block Encoder setup."),
+        ("#page-content .alert", "Check what is missing", "Only active modules contribute to this count. Optional secret-storage steps do not block MCP Encoder setup."),
         ("#module-selection", "Activate only the modules you use", "Choose which modules contribute setup reminders for this workspace, then save. Inactive modules remain accessible and existing processing is unchanged."),
-        ("#ENCODER", "Set up Encoder", "Enable local access, test an MCP connection, permit tools and add an Encoder routing destination. External execution always needs payload confirmation."),
+        ("#ENCODER", "Set up MCP Encoder", "Enable local access, test an MCP connection, permit tools and add an MCP Encoder routing destination. External execution always needs payload confirmation."),
         ("#DOC_EXTRACTION", "Prepare document extraction", "Configure a document provider before uploading files."),
         ("#ROUTER", "Prepare routing", "Add destinations and active rules that describe which documents belong there."),
         ("#ACCOUNTS_PAYABLE", "Set up Accounts payable", "Submit extraction instructions for the supplier records you need."),
@@ -29,7 +35,7 @@ GUIDES = {
         ('[aria-labelledby="information-heading"]', "Read the document status", "Processing tracks extraction. Review shows whether a person approved the text."),
         ("#extraction-results", "Compare the extracted text", "Check references, dates, amounts and items against the original."),
         ('[aria-labelledby="review-heading"]', "Record your review", "Approve correct text or reject it when corrections are needed."),
-        ('[data-routing-trigger="document"]', "Send it to routing", "Routing proposes destinations and can start AP/AR extraction automatically. Encoder only creates a draft; external execution requires separate confirmation.")),
+        ('[data-routing-trigger="document"]', "Send it to routing", "Routing proposes destinations and can start AP/AR extraction automatically. MCP Encoder only creates a draft; external execution requires separate confirmation.")),
     "upload": tour("Upload documents",
         (".upload-zone", "Choose your files", "Drop files here or use the file picker to select documents and images."),
         ("#upload-submit", "Start extraction", "Upload and extract saves the files and starts text extraction. Review the results afterwards.")),
@@ -48,20 +54,20 @@ GUIDES = {
         ('.router-heading a', "Start routing from documents", "New routing attempts begin from Documents or Batches. Open a queue row to review proposed destinations.")),
     "route": tour("Review document destinations",
         (".router-route-card, .router-route", "Review a destination", "Check its proposed module, record type and reason against the source text."),
-        ('[data-review-form] button[value="approved"]', "Approve only after checking", "Approval records your destination decision. AP/AR extraction may already have run automatically; approval retries it when needed. Encoder approval permits later review and explicit execution, never an automatic MCP call."),
+        ('[data-review-form] button[value="approved"]', "Approve only after checking", "Approval records your destination decision. AP/AR extraction may already have run automatically; approval retries it when needed. MCP Encoder approval permits later review and explicit execution, never an automatic MCP call."),
         ('#router-root select', "Choose the extraction profile", "If several profiles match, choose the one appropriate for this document."),
         ("#router-root .card", "Inspect the result", "Review status is your decision; processing status tracks creation of the accounting record. Read any errors before retrying.")),
     "destinations": tour("Routing destinations", SEARCH, TABLE,
         ('[data-action="delete-configuration"]', "Remove unused destinations", "Delete opens a confirmation. Confirmation deletes all associated routing rules and removes this destination from configuration. Past routes and downstream records are retained."),
         ("#router-name", "Name the destination", "Use a label reviewers recognize, such as Supplier invoices."),
-        ("#router-module_name", "Select the module", "Choose Accounts payable, Accounts receivable or Encoder."),
-        ("#router-target_model", "Select the record type", "Select the record type for this module, or Encoder job to create an encoding draft."),
-        ("#router-active", "Enable routing to this destination", "Only active destinations are considered. Add active rules, plus submitted AP/AR extraction profiles or an Encoder MCP connection as appropriate."), SAVE),
+        ("#router-module_name", "Select the module", "Choose Accounts payable, Accounts receivable or MCP Encoder."),
+        ("#router-target_model", "Select the record type", "Select the record type for this module, or MCP Encoder job to create an encoding draft."),
+        ("#router-active", "Enable routing to this destination", "Only active destinations are considered. Add active rules, plus submitted AP/AR extraction profiles or an MCP connection for MCP Encoder as appropriate."), SAVE),
     "rules": tour("Routing rules", SEARCH, TABLE,
         ('[data-action="delete-configuration"]', "Delete a rule", "Review the rule name and confirm deletion. Past routing attempts retain their snapshots. Disable a rule instead if you may want to reuse it."),
         ("#router-name", "Name the rule", "Choose a name that explains what this rule recognizes."),
         ("#router-destination", "Choose a destination", "This rule will recommend the selected module and record type."),
-        ("#router-encoder-fields", "Choose the Encoder operation", "For an Encoder destination, choose an enabled MCP connection and permitted operation here. Routing builds and validates a draft, using shared AI when values are missing. Resolve remaining issues in Encoder chat and confirm external execution separately."),
+        ("#router-encoder-fields", "Choose the MCP Encoder operation", "For an MCP Encoder destination, choose an enabled MCP connection and permitted operation here. Routing builds and validates a draft, using shared AI when values are missing. Resolve remaining issues in MCP Encoder chat and confirm external execution separately."),
         ("#router-instructions", "Explain what should match", "Describe the issuer, recipient and evidence to include. State when this destination should be excluded."),
         ("#router-examples", "Add useful examples", "Give examples of documents that should and should not match."),
         ("#router-active", "Activate the rule", "Only active rules for active destinations are used."), SAVE),
@@ -123,15 +129,15 @@ GUIDES = {
 }
 
 
-ENCODER_NAV = ('.finance-nav', "Move through Encoder", "Use Document queue, MCP connections and Execution history to prepare and inspect encoding jobs.")
+ENCODER_NAV = ('.finance-nav', "Move through MCP Encoder", "Use Document queue, MCP connections and Execution history to prepare and inspect encoding jobs.")
 GUIDES.update({
-    "encoder_queue": tour("Encoder document queue", ENCODER_NAV,
+    "encoder_queue": tour("MCP Encoder document queue", ENCODER_NAV,
         ('#status', "Filter processing status", "Jobs arrive only through Router. Filter to find jobs needing review or retry; open a document to continue."),
         TABLE,
         ('a[href="/router/"]', "Review the route first", "Routing creates a draft, never an external write. Approve the current source document and route before confirming an MCP operation.")),
-    "encoder_job": tour("Encoder document workspace", ENCODER_NAV,
+    "encoder_job": tour("MCP Encoder document workspace", ENCODER_NAV,
         ('#reset-workspace', "Start a fresh cycle", "Reset archives the current draft and starts an empty conversation. Previous chats, LLM logs and execution attempts remain available. It never undoes ERP changes; uncertain outcomes still require verification."),
-        ('.file-preview', "Compare the original", "Use the existing document preview and extracted text as evidence. Encoder does not perform OCR again."),
+        ('.file-preview', "Compare the original", "Use the existing document preview and extracted text as evidence. MCP Encoder does not perform OCR again."),
         ('[data-routed-operation], [data-operation-form]', "Review the permitted operation", "New routing rules select the MCP connection and operation and prepare the payload automatically. Older drafts still allow a manual selection here. The tool schema supplies required and optional fields."),
         ('form[action$="/payload/"]', "Prepare and validate values", "Correct fields and save to validate. Mappings, defaults and AI suggestions can prepare values; missing required information must be supplied or flagged."),
         ('#encoder-chat', "Troubleshoot with AI", "Chat uses this job's document, schema and errors. Inspect a proposal and apply or reject it separately; AI cannot execute the MCP tool."),
@@ -152,10 +158,10 @@ GUIDES.update({
         ('button[value="discover"]', "Refresh discovered tools", "Test this saved connection and read the server's current tool catalog. Changed tools lose their prior approval."),
         ('input[name="approved_tools"]', "Permit intended operations", "Inspect each tool's description and schema before permitting it. Execution still requires a separate confirmed job payload."),
         ('details', "Inspect the input schema", "Required fields, types and nested structures define validation and mapping for each operation.")),
-    "encoder_mapping": tour("Reusable Encoder mapping", ENCODER_NAV,
+    "encoder_mapping": tour("Reusable MCP Encoder mapping", ENCODER_NAV,
         ('#mappings', "Configure source paths and defaults", "Map tool fields from existing extracted data using source paths, supported transformations and explicit defaults. Missing required business values are never invented."),
-        ('#idempotency_field', "Configure idempotency only when documented", "Choose a string parameter only if the server documents it as an idempotency key. Encoder supplies a stable job UUID; the server must enforce deduplication.")),
-    "encoder_history": tour("Encoder execution history", ENCODER_NAV, TABLE,
+        ('#idempotency_field', "Configure idempotency only when documented", "Choose a string parameter only if the server documents it as an idempotency key. MCP Encoder supplies a stable job UUID; the server must enforce deduplication.")),
+    "encoder_history": tour("MCP Encoder execution history", ENCODER_NAV, TABLE,
         ('.encoder-json', "Review the submitted data and result", "Each attempt retains its exact payload, tool schema, response, confirmation time and errors. An unknown result must be checked externally before retrying.")),
     "database_runs": tour("Database extraction history", TABLE),
     "database_run": tour("Database extraction run", TABLE, ('#page-content .card', "Read the snapshot outcome", "This is one metadata extraction attempt. Failures do not replace earlier successful snapshots.")),
@@ -170,7 +176,7 @@ def for_page(request):
     match = request.resolver_match
     name = match.url_name or ""
     namespace = match.namespace
-    key = "setup"
+    key = "guided_setup" if name == "guided_setup" else "setup"
     if namespace == "DOC_EXTRACTION":
         if name.endswith("_delete"):
             key = "document_delete"

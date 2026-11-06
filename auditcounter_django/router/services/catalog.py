@@ -8,7 +8,7 @@ to resolve through the accounting catalog for compatibility.
 from django.apps import apps
 
 MODULES = (
-    ("encoder", "Encoder", ("EncoderJob",)),
+    ("encoder", "MCP Encoder", ("EncoderJob",)),
     ("accounts_payable", "AP · Suppliers", ("Supplier",)),
     ("company_purchase_order", "AP · Company purchase orders", ("CompanyPurchaseOrder",)),
     ("supplier_delivery_receipt", "AP · Supplier delivery receipts", ("SupplierDeliveryReceipt",)),

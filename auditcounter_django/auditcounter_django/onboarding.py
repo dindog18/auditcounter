@@ -6,13 +6,20 @@ from django.contrib import messages
 from django.db import transaction, IntegrityError
 from django.http import HttpResponseBadRequest
 from document_extraction.models import WorkspaceSetupPreferences, SETUP_MODULES, default_setup_modules
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.db.models import F
 
 from db_extraction.credentials import credential_cipher
 from accounts_receivable.services.catalog import TARGETS, DOCUMENT_APPS
 from django.shortcuts import render, redirect
 from django.urls import reverse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
+from encoder.middleware import encoder_access_allowed
+from encoder.services.discovery import tool as encoder_tool
+from router.models import RoutingRule
+
+from router.services.catalog import MODULES as ROUTING_MODULES
 
 from .environment import get_env
 from .page_help import for_page
@@ -72,9 +79,9 @@ def checklist(active_modules=None):
         groups.append(value)
         return value
 
-    def step(group, title, ready, detail, route, label, optional=False):
+    def step(group, title, ready, detail, route, label, optional=False, *, environment=False):
         group["steps"].append({"title": title, "ready": ready, "detail": detail,
-                               "url": reverse(route), "label": label, "optional": optional})
+                               "url": reverse(route), "label": label, "optional": optional, "environment": environment})
 
     doc = group("DOC_EXTRACTION", "Document extraction", "Upload files, extract text, and approve the result before routing.")
     ready, detail = provider_check("DOC_EXTRACTION")
@@ -101,7 +108,7 @@ def checklist(active_modules=None):
             target = targets.get(destination.target_model)
             ready = bool(target) and configs.filter(source_type="document", target_entity=target).exists()
             step(accounting, "Document profile: " + destination.name, ready, "Submit a document configuration for this target. If several profiles match, choose one during route review. Account-specific profiles require a matching account.", namespace + ":configuration_list", "Review configurations")
-    assistant = group("CONFIG_ASSISTANT", "Configuration assistant", "A shared LLM builds and tests Record First document prompts and assists AP/AR query mapping and Encoder troubleshooting. Review and confirm configurations before activation.")
+    assistant = group("CONFIG_ASSISTANT", "Configuration assistant", "A shared LLM builds and tests Record First document prompts and assists AP/AR query mapping and MCP Encoder troubleshooting. Review and confirm configurations before activation.")
     ready, detail = provider_check("CONFIG_ASSISTANT")
     step(assistant, "Configure the assistant LLM", ready, detail, "ACCOUNTS_PAYABLE:configuration_list", "Open extraction setup")
     database = group("DB_EXTRACTION", "Database extraction (optional)", "Only needed when importing from PostgreSQL. Document routing works without it.")
@@ -117,9 +124,9 @@ def checklist(active_modules=None):
     step(database, "Add an enabled connection", sources.exists(), "Enter host, port, database, username, password and SSL settings. Test the connection before refreshing metadata.", "DB_EXTRACTION:source_create", "Add connection")
     ready = apps.get_model("db_extraction", "ExtractionRun").objects.filter(source__enabled=True, status="completed").exists()
     step(database, "Refresh schema metadata", ready, "Open a connection and refresh metadata. Then select its tables and map fields in an AP or AR database configuration. Submit that configuration before importing.", "DB_EXTRACTION:source_list", "Open connections")
-    encoder = group("ENCODER", "Encoder", "Prepare routed document payloads for approved MCP tools, then review and confirm every external execution.")
-    step(encoder, "Enable local Encoder access", settings.ENCODER_LOCAL_ENABLED,
-         "Set ENCODER_LOCAL_ENABLED=true and use a trusted loopback development server. Module activation here controls reminders; it does not override the local access restriction.", "ENCODER:dashboard", "Open Encoder")
+    encoder = group("ENCODER", "MCP Encoder", "Prepare routed document payloads for approved MCP tools, then review and confirm every external execution.")
+    step(encoder, "Enable local MCP Encoder access", settings.ENCODER_LOCAL_ENABLED,
+         "Set ENCODER_LOCAL_ENABLED=true and use a trusted loopback development server. Module activation here controls reminders; it does not override the local access restriction.", "ENCODER:dashboard", "Open MCP Encoder", environment=True)
     connections = apps.get_model("encoder", "MCPConnection").objects.filter(enabled=True).defer("environment", "http_headers")
     step(encoder, "Test and save an MCP connection", connections.filter(discovered_at__isnull=False, discovery_error="").exists(),
          "Choose STDIO or Streamable HTTP and enter its server details. Test and save discovers tools without calling business operations.", "ENCODER:connection_create", "Add MCP connection")
@@ -128,10 +135,10 @@ def checklist(active_modules=None):
     step(encoder, "Prepare encrypted secret storage (if needed)", key_ready,
          "Uses the same init_db_credential_key command as Database Connections. Needed only when saving secret environment variables or HTTP headers.", "ENCODER:connections", "Open connections", optional=True)
     ready, detail = provider_check("CONFIG_ASSISTANT")
-    step(encoder, "Configure mapping and troubleshooting AI", ready, detail + " Encoder shares CONFIG_ASSISTANT_* settings.", "ENCODER:dashboard", "Open Encoder")
+    step(encoder, "Configure mapping and troubleshooting AI", ready, detail + " MCP Encoder shares CONFIG_ASSISTANT_* settings.", "ENCODER:dashboard", "Open MCP Encoder", environment=True)
     encoder_destinations = destinations.filter(module_name="encoder", target_model="EncoderJob")
-    step(encoder, "Route documents to Encoder", encoder_destinations.filter(rules__is_active=True).exists(),
-         "Add an Encoder job destination and active rule in Router. Routing creates a draft; approve the current document and route, map fields, then explicitly confirm execution.", "ROUTER:destinations", "Review destinations")
+    step(encoder, "Route documents to MCP Encoder", encoder_destinations.filter(rules__is_active=True).exists(),
+         "Add an MCP Encoder job destination and active rule in Router. Routing creates a draft; approve the current document and route, map fields, then explicitly confirm execution.", "ROUTER:destinations", "Review destinations")
     for position, item in enumerate(groups):
         item["position"] = position
         item["active"] = item["key"] in active_modules
@@ -143,6 +150,9 @@ def checklist(active_modules=None):
 def workspace_guidance(request):
     match = request.resolver_match
     namespaces = {"DOC_EXTRACTION", "DB_EXTRACTION", "ROUTER", "ACCOUNTS_PAYABLE", "ACCOUNTS_RECEIVABLE", "ENCODER"}
+    if match and match.url_name == "guided_setup":
+        guide = for_page(request)
+        return {"page_help_title": guide["title"], "page_guide": guide}
     if not match or (match.namespace not in namespaces and match.url_name != "setup"):
         return {}
     if "/api/" in request.path:
@@ -159,6 +169,93 @@ def workspace_guidance(request):
 @require_GET
 def setup(request):
     return render(request, "document_extraction/setup.html", {"page_title": "Application setup", "section": "setup"})
+
+
+@require_GET
+def setup_preview(request):
+    return redirect("guided_setup")
+
+
+@never_cache
+@require_GET
+def guided_setup(request):
+    groups = checklist(default_setup_modules())
+    by_module = {group["key"]: group["steps"] for group in groups}
+    environment = {key: steps[0]["ready"] for key, steps in by_module.items()}
+    current_snapshots = apps.get_model("db_extraction", "ExtractionRun").objects.filter(
+        source__enabled=True, status="completed", created_at__gte=F("source__updated_at"),
+    )
+    ready_sources = set(current_snapshots.values_list("source_id", flat=True))
+    routing_rules = RoutingRule.objects.filter(
+        is_active=True, destination__is_active=True, destination__is_deleted=False,
+    )
+    routed_targets = set(routing_rules.values_list("destination__module_name", "destination__target_model"))
+    encoder_rule_ready = False
+    for rule in routing_rules.filter(
+        destination__module_name="encoder", destination__target_model="EncoderJob",
+        encoder_connection__enabled=True, encoder_connection__discovered_at__isnull=False,
+        encoder_connection__discovery_error="",
+    ).select_related("encoder_connection").defer("encoder_connection__environment", "encoder_connection__http_headers"):
+        try:
+            encoder_tool(rule.encoder_connection, rule.encoder_tool)
+        except ValidationError:
+            continue
+        encoder_rule_ready = True
+        break
+    readiness = {
+        "database": by_module["DB_EXTRACTION"][0]["ready"] and bool(ready_sources),
+        "router": environment["ROUTER"],
+        "encoder_access": encoder_access_allowed(request),
+        "encoder_rule": encoder_rule_ready,
+        "encoder_connection": by_module["ENCODER"][1]["ready"] and by_module["ENCODER"][2]["ready"],
+    }
+    records = {
+        "Purchase order": ("purchase_order", "purchase_order"),
+        "Delivery receipt": ("delivery_receipt", "delivery_receipt"),
+        "Sales invoice": ("invoice", "sales_invoice"),
+        "Payment": ("payment", "payment"),
+        "Deduction": ("deduction", "deduction"),
+    }
+    routes = {}
+    for module, namespace, party, mode in (
+        ("Accounts Payable", "ACCOUNTS_PAYABLE", "Supplier", "ap"),
+        ("Accounts Receivable", "ACCOUNTS_RECEIVABLE", "Customer", "ar"),
+    ):
+        submitted = apps.get_model(namespace.lower(), "ExtractionConfiguration").objects.filter(
+            status="submitted",
+        ).exclude(submitted_snapshot={})
+        document_targets = set(submitted.filter(source_type="document").values_list("target_entity", flat=True))
+        database_targets = set(submitted.filter(
+            source_type="database", database_source_id__in=ready_sources,
+            source_table__schema__run__source_id=F("database_source_id"),
+            source_table__schema__run__status="completed",
+        ).values_list("target_entity", flat=True))
+        for label, (route, target) in {party: ("party", party.lower()), **records}.items():
+            target_model = TARGETS[mode][target]
+            app_label = DOCUMENT_APPS.get(target_model, f"{mode}_deduction" if target == "deduction" else namespace.lower())
+            routing_label = next(name for app, name, models in ROUTING_MODULES
+                                 if app == app_label and target_model in models)
+            routes[f"{module}|{label}"] = {
+                "routing_module": routing_label,
+                "routing_model": str(apps.get_model(app_label, target_model)._meta.verbose_name),
+                "create": reverse(f"{namespace}:configuration_{route}_create"),
+                "list": reverse(f"{namespace}:configuration_{route}_list"),
+                "target": target,
+                "document_ready": target in document_targets,
+                "document_environment": all(environment[key] for key in ("DOC_EXTRACTION", "CONFIG_ASSISTANT", namespace)),
+                "database_ready": readiness["database"] and target in database_targets,
+                "routing_ready": (app_label, target_model) in routed_targets or
+                                 (namespace.lower(), target_model) in routed_targets,
+                "manual_create": reverse(f"{namespace}:{route}_create"),
+                "manual_list": reverse(f"{namespace}:{route}_list"),
+            }
+    return render(request, "document_extraction/setup_preview.html", {
+        "page_title": "Guided setup",
+        "section": "guided_setup",
+        "guided_setup_readiness": readiness,
+        "setup_preview_routes": routes,
+        "setup_groups": groups,
+    })
 
 
 @require_POST

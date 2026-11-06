@@ -48,7 +48,7 @@ def route_approved(job):
     if (route.review_status != "approved" or job.document.review_status != "approved"
             or not route.destination.is_active or route.destination.module_name != "encoder"
             or route.destination.target_model != "EncoderJob" or route.processing_status != "completed"):
-        raise ValidationError("Approve the current source document and Encoder route before executing.")
+        raise ValidationError("Approve the current source document and MCP Encoder route before executing.")
 
 
 def execute(job_id, token, *, confirmed=False, reconciled=False):

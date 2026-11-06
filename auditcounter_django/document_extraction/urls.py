@@ -1,11 +1,10 @@
 from django.urls import path
-from django.views.generic.base import RedirectView
 from . import views
 
 app_name = "DOC_EXTRACTION"
 
 urlpatterns = [
-    path("", RedirectView.as_view(pattern_name="DOC_EXTRACTION:document_list", permanent=False), name="home"),
+    path("", views.home, name="home"),
     path("documents/", views.document_list, name="document_list"),
     path("documents/upload/", views.document_upload, name="document_upload"),
     path(

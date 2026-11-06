@@ -84,11 +84,11 @@
         const value=document.getElementById(`route-profile-${id}`).value;
         button.disabled = true;
         button.textContent = encoder ? "Creating draft…" : "Extracting…";
-        ui.notice(encoder ? "Creating an Encoder draft… No external operation will run." : "Processing the AP/AR extraction… Please wait for the saved result.");
+        ui.notice(encoder ? "Creating an MCP Encoder draft… No external operation will run." : "Processing the AP/AR extraction… Please wait for the saved result.");
         try {
           const saved=await ui.post(ui.apiURL("process",id), {revision:route.revision, configuration_id:value?Number(value):null});
           Object.assign(route,saved);
-          ui.notice(`${encoder ? "Encoder draft handoff" : "Accounting processing"}: ${route.processing_status}${route.processing_error ? '. ' + route.processing_error : ''}`,route.processing_status==='failed');
+          ui.notice(`${encoder ? "MCP Encoder draft handoff" : "Accounting processing"}: ${route.processing_status}${route.processing_error ? '. ' + route.processing_error : ''}`,route.processing_status==='failed');
         } finally { ui.render(); }
         break;
       }

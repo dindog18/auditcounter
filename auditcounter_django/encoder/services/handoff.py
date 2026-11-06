@@ -1,4 +1,4 @@
-"""Prepare a rule-configured Encoder draft; external execution always remains explicit."""
+"""Prepare a rule-configured MCP Encoder draft; external execution always remains explicit."""
 from django.core.exceptions import ValidationError
 from ..models import EncoderJob, MCPConnection
 from . import mapping, chat
@@ -6,7 +6,7 @@ from . import mapping, chat
 
 def create_job(route):
     if route.destination.target_model != "EncoderJob":
-        raise ValidationError("Choose Encoder job as the Encoder routing target.")
+        raise ValidationError("Choose MCP Encoder job as the MCP Encoder routing target.")
     job, created = EncoderJob.objects.get_or_create(route=route)
     if not created:
         return job  # Never regenerate a prepared payload or repeat a paid request on replay.

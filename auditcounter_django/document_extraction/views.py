@@ -2,11 +2,13 @@
 
 import logging
 
+from django.apps import apps
 from django.http import FileResponse, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
-from .models import DocExtractionLog, LLMExtractionLog
+from .models import DocExtractionLog, Document, LLMExtractionLog
 from .services import management, pages
 from .services.originals import original_file_response
 from .forms import DocumentUploadForm
@@ -14,6 +16,35 @@ from .services.documents import PDFExtractionError
 from .services.uploads import process_document_upload
 
 logger = logging.getLogger(__name__)
+
+
+@never_cache
+@require_safe
+def home(request: HttpRequest) -> HttpResponse:
+    """Use persisted workspace activity and a browser's completed setup as landing hints."""
+    documents = "DOC_EXTRACTION:document_list"
+    if request.COOKIES.get("auditcounter_guided_setup_finished") == "1" or Document.objects.exists():
+        return redirect(documents)
+
+    for app_label, party in (("accounts_payable", "Supplier"), ("accounts_receivable", "Customer")):
+        if apps.get_model(app_label, party).objects.exists():
+            return redirect(documents)
+        if apps.get_model(app_label, "ExtractionConfiguration").objects.filter(
+            status="submitted",
+        ).exclude(submitted_snapshot={}).exists():
+            return redirect(documents)
+
+    if apps.get_model("router", "RoutingRule").objects.filter(
+        is_active=True, destination__is_active=True, destination__is_deleted=False,
+    ).exists():
+        return redirect(documents)
+    if apps.get_model("db_extraction", "ExtractionRun").objects.filter(source__enabled=True, status="completed").exists():
+        return redirect(documents)
+    if apps.get_model("encoder", "MCPConnection").objects.filter(
+        enabled=True, discovered_at__isnull=False, discovery_error="",
+    ).exists():
+        return redirect(documents)
+    return redirect("guided_setup")
 
 
 @require_safe

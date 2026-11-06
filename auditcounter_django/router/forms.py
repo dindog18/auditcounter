@@ -67,7 +67,7 @@ class RuleForm(forms.ModelForm):
             from encoder.services.discovery import tool
             connection = data.get("encoder_connection")
             if not connection or not data.get("encoder_tool"):
-                raise forms.ValidationError("Choose an MCP connection and permitted operation for this Encoder rule.")
+                raise forms.ValidationError("Choose an MCP connection and permitted operation for this MCP Encoder rule.")
             tool(connection, data["encoder_tool"])
         else:
             data["encoder_connection"], data["encoder_tool"] = None, ""
