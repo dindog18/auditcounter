@@ -28,7 +28,7 @@ def dashboard(request):
     jobs = EncoderJob.objects.select_related("route__routing_log__source_document", "connection").prefetch_related("executions")
     if request.GET.get("status") in EncoderJob.Status.values:
         jobs = jobs.filter(status=request.GET["status"])
-    return render(request, "encoder/dashboard.html", context("Encoder", page=Paginator(jobs, 30).get_page(request.GET.get("page")), statuses=EncoderJob.Status.choices))
+    return render(request, "encoder/dashboard.html", context("MCP Encoder", page=Paginator(jobs, 30).get_page(request.GET.get("page")), statuses=EncoderJob.Status.choices))
 
 
 @require_safe
@@ -45,9 +45,10 @@ def workspace(request, job_id):
     current_proposal = next((answer for answer in reversed(chat_messages)
                              if answer.cycle == job.cycle and answer.decision in {"accepted", "prepared"}
                              and answer.proposal.get("payload") == job.prepared_payload), None)
-    return render(request, "encoder/workspace.html", context(f"Encoder job #{job.pk}", job=job, document=job.document,
+    unknown_attempts = list(execution.outstanding_attempts(job).filter(status="unknown"))
+    return render(request, "encoder/workspace.html", context(f"MCP Encoder job #{job.pk}", job=job, document=job.document,
         operation_form=OperationForm(job=job, selected_connection=request.GET.get("connection")), payload_form=PayloadForm(job=job), mapping_form=MappingForm(job=job),
-        token=execution.review_token(job), payload_json=json.dumps(job.prepared_payload, indent=2, ensure_ascii=False),
+        token=execution.review_token(job, unknown_attempts), unknown_attempts=unknown_attempts, payload_json=json.dumps(job.prepared_payload, indent=2, ensure_ascii=False),
         mappings_json=json.dumps(job.field_mappings, indent=2), source_json=json.dumps(mapping.source_data(job), indent=2, ensure_ascii=False),
         show_chat_history=show_history, reset_history=[{"cycle": row.cycle, "created_at": row.created_at, "snapshot": json.dumps(row.snapshot, indent=2, ensure_ascii=False)} for row in job.resets.all()],
         data_review=review(job.prepared_payload, job.tool_schema), review_warnings=current_proposal.proposal.get("issues", []) if current_proposal else [], chat_messages=chat_messages, executions=job.executions.all()))
@@ -88,7 +89,7 @@ def job_action(request, job_id, action):
             message = get_object_or_404(EncoderChatMessage, job=job, pk=request.POST.get("message_id"), role="assistant")
             chat.decide(job.pk, message.pk, "accepted" if action == "accept" else "rejected", request.POST.get("revision"))
         else:
-            return HttpResponseBadRequest("Unknown Encoder action.")
+            return HttpResponseBadRequest("Unknown MCP Encoder action.")
     except (ValidationError, ValueError, TypeError) as error:
         notify_error(request, error)
     if action in {"chat", "accept", "reject"}:
@@ -188,7 +189,7 @@ def mapping_edit(request, connection_id, tool_name):
 @require_safe
 def history(request):
     rows = EncoderExecution.objects.select_related("job__route__routing_log__source_document", "connection")
-    return render(request, "encoder/history.html", context("Encoder execution history", page=Paginator(rows, 30).get_page(request.GET.get("page"))))
+    return render(request, "encoder/history.html", context("MCP Encoder execution history", page=Paginator(rows, 30).get_page(request.GET.get("page"))))
 
 
 @require_safe
@@ -203,11 +204,11 @@ def llm_logs(request):
     rows = EncoderChatMessage.objects.filter(role="assistant").select_related("job__route__routing_log__source_document").order_by("-pk")
     if request.GET.get("status") in {"completed", "failed", "processing"}:
         rows = rows.filter(status=request.GET["status"])
-    return render(request, "encoder/llm_logs.html", context("Encoder LLM activity", page=Paginator(rows, 30).get_page(request.GET.get("page"))))
+    return render(request, "encoder/llm_logs.html", context("MCP Encoder LLM activity", page=Paginator(rows, 30).get_page(request.GET.get("page"))))
 
 
 @require_safe
 def llm_log_detail(request, message_id):
     row = get_object_or_404(EncoderChatMessage.objects.select_related("job__route__routing_log__source_document"), pk=message_id, role="assistant")
-    return render(request, "encoder/llm_log_detail.html", context(f"Encoder LLM attempt #{row.pk}", attempt=row,
+    return render(request, "encoder/llm_log_detail.html", context(f"MCP Encoder LLM attempt #{row.pk}", attempt=row,
         request_json=json.dumps(row.request_payload, indent=2, ensure_ascii=False), response_json=json.dumps(row.response_payload, indent=2, ensure_ascii=False)))

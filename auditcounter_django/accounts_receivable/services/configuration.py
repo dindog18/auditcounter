@@ -58,7 +58,8 @@ def validate(record, mode, submit=False):
         raise ValidationError("Choose different decimal and thousands separators.")
     key = party_key(mode)
     for relation, lookup in record.relation_lookups.items():
-        if relation != key or not isinstance(lookup, dict) or lookup.get("match_field") not in {key+"_code", "tax_identification_no", key+"_name"} or lookup.get("on_missing", "review") != "review":
+        valid_relation = relation == key or (relation == 'purchase_order' and record.target_entity in {'sales_invoice', 'delivery_receipt', 'deduction'})
+        if not valid_relation or not isinstance(lookup, dict) or lookup.get("match_field") not in ({'po_reference_no'} if relation == 'purchase_order' else {key+"_code", "tax_identification_no", key+"_name"}) or lookup.get("on_missing", "review") != "review":
             raise ValidationError("Resolve accounts by code, name, or tax ID; missing accounts require review.")
     if record.setup_data:
         from .setup.configuration import validate_setup

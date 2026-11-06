@@ -1,0 +1,52 @@
+/* Status colors always accompany a written assessment and symbol. */
+.recon-good, .recon-reviewed { --recon-fg:var(--biz-color-success-fg); --recon-bg:var(--biz-color-success-bg); }
+.recon-bad { --recon-fg:var(--biz-color-error-fg); --recon-bg:var(--biz-color-error-bg); }
+.recon-waiting { --recon-fg:var(--biz-color-warning-fg); --recon-bg:var(--biz-color-warning-bg); }
+.recon-neutral { --recon-fg:var(--biz-color-text-secondary); --recon-bg:var(--biz-color-bg-subtle); }
+.recon-detail > .card { margin-bottom:1.25rem; }
+.recon-verdict { border-left:4px solid currentColor; padding:1.25rem; line-height:1.6; }
+.recon-verdict strong { display:block; font-size:1.05rem; margin-bottom:.25rem; }
+.recon-overview { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin:1.25rem 0; }
+.recon-check { display:flex; flex-direction:column; align-items:flex-start; gap:.8rem; padding:1.15rem; border:1px solid var(--falcon-border-color); border-top:4px solid var(--recon-fg); border-radius:10px; background:var(--biz-color-bg-surface); color:var(--biz-color-text-primary); text-decoration:none; min-width:0; }
+.recon-check:hover { color:var(--biz-color-text-primary); background:var(--recon-bg); text-decoration:none; }
+.recon-check-title { font-weight:700; font-size:.95rem; }
+.recon-check-detail { font-size:.8125rem; color:var(--biz-color-text-secondary); line-height:1.6; }
+.recon-check-action { margin-top:auto; padding-top:.35rem; font-weight:600; font-size:.8rem; color:var(--finance-accent); }
+.recon-pill { display:inline-flex; align-items:center; gap:.45rem; padding:.35rem .65rem; border-radius:6px; background:var(--recon-bg); color:var(--recon-fg); font-size:.75rem; font-weight:700; line-height:1.4; }
+.recon-pill > span { display:inline-flex; align-items:center; justify-content:center; width:1.1rem; height:1.1rem; border:1px solid currentColor; border-radius:50%; flex-shrink:0; }
+.recon-attention { border-left:4px solid var(--biz-color-error-fg); }
+.recon-findings summary { color:var(--biz-color-error-fg); font-weight:700; cursor:pointer; }
+.recon-findings ul { margin:.85rem 0; padding-left:1.25rem; }
+.recon-findings li { padding:.25rem 0; line-height:1.6; }
+.recon-findings p, .recon-row-description { color:var(--biz-color-text-secondary); line-height:1.6; font-size:.8125rem; }
+.recon-notice { background:var(--recon-bg); border-radius:8px; padding:1rem; margin-top:1rem; }
+.recon-notice strong { color:var(--recon-fg); }
+.recon-reference-list { list-style:none; padding:0; margin:0; display:grid; gap:1rem; }
+.recon-reference { border:1px solid var(--falcon-border-color); border-left:4px solid var(--recon-fg); border-radius:8px; padding:1rem; }
+.recon-row-title { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:.75rem; margin-bottom:.65rem; }
+.recon-compare { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; padding:1rem; background:var(--biz-color-bg-subtle); border-radius:6px; margin-bottom:.5rem; }
+.recon-compare span { display:block; color:var(--biz-color-text-secondary); font-size:.75rem; margin-bottom:.25rem; }
+.recon-compare strong { overflow-wrap:anywhere; }
+.recon-anchor { scroll-margin-top:90px; }
+.recon-line-filters { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.8rem; }
+.recon-line-filters .btn[aria-pressed="true"] { color:var(--biz-color-action-default); background:var(--biz-color-selection-bg); border-color:var(--biz-color-action-default); box-shadow:inset 0 0 0 1px var(--biz-color-action-default); }
+.recon-filter-result { color:var(--biz-color-text-secondary); font-size:.8rem; }
+.recon-quantity > :first-child { border-left:4px solid var(--recon-fg); }
+.recon-quantity > :nth-child(3), .recon-quantity > :nth-child(4), .recon-quantity > :nth-child(5) { text-align:right; font-variant-numeric:tabular-nums; }
+.recon-quantity > :last-child { min-width:260px; }
+.recon-quantity .recon-row-description { margin-top:.5rem; max-width:35rem; }
+.recon-line { border:1px solid var(--falcon-border-color); border-left:4px solid var(--recon-fg); border-radius:8px; padding:1rem; margin-bottom:.75rem; }
+.recon-line > summary { display:flex; justify-content:space-between; align-items:center; gap:1rem; cursor:pointer; }
+.recon-line > summary::before { content:'+'; font-weight:700; color:var(--recon-fg); }
+.recon-line[open] > summary::before { content:'−'; }
+.recon-line > summary > span:first-child { flex:1; }
+.recon-detail :is(a,button,summary):focus-visible { outline:3px solid var(--finance-accent); outline-offset:3px; }
+.recon-detail [hidden] { display:none !important; }
+@media (max-width:1199px) { .recon-overview { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:575px) {
+  .recon-overview { grid-template-columns:1fr; gap:.75rem; }
+  .recon-check { gap:.6rem; }
+  .recon-compare { grid-template-columns:1fr; }
+  .recon-line > summary { flex-wrap:wrap; }
+  .recon-line > summary > span:first-child { min-width:70%; }
+}

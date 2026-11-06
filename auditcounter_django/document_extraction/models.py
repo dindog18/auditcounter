@@ -87,7 +87,7 @@ SETUP_MODULES = ("DOC_EXTRACTION", "ROUTER", "ACCOUNTS_PAYABLE", "ACCOUNTS_RECEI
 
 
 def default_setup_modules():
-    # Preserve existing workspace reminders; database/Encoder setup is opt-in.
+    # Preserve existing workspace reminders; database/MCP Encoder setup is opt-in.
     return list(SETUP_MODULES[:5])
 
 

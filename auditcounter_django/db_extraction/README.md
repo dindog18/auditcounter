@@ -116,3 +116,11 @@ Catalog implementation references:
 [PostgreSQL catalogs](https://www.postgresql.org/docs/current/catalogs.html),
 [constraints](https://www.postgresql.org/docs/current/catalog-pg-constraint.html),
 [Psycopg connections](https://www.psycopg.org/psycopg3/docs/api/connections.html).
+
+## Handoff to accounting
+
+In the AP or AR record register, **Extraction setup** can use a completed schema
+snapshot to build and test a mapping. The accounting workflow queries business
+rows with its own read-only query and review process. Confirmation saves data
+in AuditCounter’s application database. See the
+[accounting migration and update guide](../accounts_receivable/DATABASE_MIGRATION.md).

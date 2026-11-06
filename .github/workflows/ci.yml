@@ -36,5 +36,7 @@ jobs:
         run: python auditcounter_django/manage.py check
       - name: Check for missing migrations
         run: python auditcounter_django/manage.py makemigrations --check --dry-run
+      - name: Check reconciliation heading escaping
+        run: node --test auditcounter_django/accounts_receivable/frontend_tests/po-heading-escaping.test.cjs
       - name: Run tests
         run: python auditcounter_django/manage.py test document_extraction db_extraction router encoder accounts_receivable accounts_payable --noinput

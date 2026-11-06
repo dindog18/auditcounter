@@ -15,9 +15,9 @@
     observer.observe(active); observer.observe(nav);
   }), {once:true});
   const esc = (value = '') => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-  const labels = {customer:'Customer', supplier:'Supplier', purchase_order:'Purchase order', delivery_receipt:'Delivery receipt', sales_invoice:'Sales invoice', payment:'Payment', extraction:'Record extraction', configuration:'Configuration assistance', database:'Database extraction', document:'Document extraction', queued:'Queued', processing:'Processing', completed:'Completed', failed:'Failed'};
-  const resourceFor = {customer:'parties',supplier:'parties',purchase_order:'purchase-orders',delivery_receipt:'delivery-receipts',sales_invoice:'invoices',payment:'payments'};
-  const relationFor = {customer:'customer',supplier:'supplier',purchase_order:'purchase_order',delivery_receipt:'delivery_receipt',sales_invoice:'sales_invoice',payment:'payment'};
+  const labels = {customer:'Customer', supplier:'Supplier', purchase_order:'Purchase order', delivery_receipt:'Delivery receipt', sales_invoice:'Sales invoice', payment:'Payment', deduction:'Deduction', extraction:'Record extraction', configuration:'Configuration assistance', database:'Database extraction', document:'Document extraction', queued:'Queued', processing:'Processing', completed:'Completed', failed:'Failed'};
+  const resourceFor = {customer:'parties',supplier:'parties',purchase_order:'purchase-orders',delivery_receipt:'delivery-receipts',sales_invoice:'invoices',payment:'payments',deduction:'deductions'};
+  const relationFor = {customer:'customer',supplier:'supplier',purchase_order:'purchase_order',delivery_receipt:'delivery_receipt',sales_invoice:'sales_invoice',payment:'payment',deduction:'deduction'};
   const link = (href, text, cls = '') => `<a class="${cls}" href="${esc(href)}">${text}</a>`;
   const detailURL = id => config.routes['llm-logs'] + id + '/';
   const localDate = value => value ? new Date(value).toLocaleString('en-GB', {dateStyle:'medium',timeStyle:'short'}) : '—';

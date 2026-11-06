@@ -250,11 +250,56 @@ class EncoderTests(TestCase):
         token = self.ready()
         client = self.mock_connector(side_effect=mcp_client.MCPError("Timeout"))
         first = execution.execute(self.job.pk, token, confirmed=True)
+        discovery.discover(self.connection)
         token = self.ready()
         client.call.side_effect = None
         second = execution.execute(self.job.pk, token, confirmed=True)
         self.assertEqual(first.payload, second.payload)
         self.assertEqual(second.payload["request_key"], str(self.job.idempotency_key))
+
+    def test_changed_connection_blocks_retry_with_same_key_and_fresh_review(self):
+        EncoderMapping.objects.create(connection=self.connection, tool_name=TOOL["name"], idempotency_field="request_key")
+        token = self.ready()
+        client = self.mock_connector(side_effect=TimeoutError)
+        first = execution.execute(self.job.pk, token, confirmed=True)
+        self.connection.command = "different-mcp-executable"
+        self.connection.save()
+        token = self.ready()
+        with self.assertRaisesMessage(ValidationError, "Verify externally"):
+            execution.execute(self.job.pk, token, confirmed=True)
+        self.assertEqual(self.job.prepared_payload, first.payload)
+        client.call.assert_called_once()
+
+    def test_rerouted_job_requires_review_of_prior_unknown_attempt(self):
+        token = self.ready()
+        client = self.mock_connector(side_effect=TimeoutError)
+        first = execution.execute(self.job.pk, token, confirmed=True)
+        new_log = LLMRoutingLog.objects.create(
+            source_document=self.document, source_text_log=self.source, status="completed",
+            source_revision=self.document.updated_at.isoformat(), input_text=self.source.markdown_text,
+        )
+        new_route = DocumentRoute.objects.create(
+            routing_log=new_log, destination=self.destination, review_status="approved",
+        )
+        handoff.process(new_route.pk)
+        self.job = EncoderJob.objects.get(route=new_route)
+        token = self.ready()
+        self.assertContains(self.client.get(reverse("ENCODER:workspace", args=[self.job.pk])),
+                            reverse("ENCODER:execution_detail", args=[first.pk]))
+        with self.assertRaisesMessage(ValidationError, "Verify externally"):
+            execution.execute(self.job.pk, token, confirmed=True)
+        client.call.assert_called_once()
+        EncoderExecution.objects.create(
+            job=first.job, connection=self.connection, tool_name=first.tool_name, status="unknown",
+        )
+        with self.assertRaisesMessage(ValidationError, "history changed"):
+            execution.execute(self.job.pk, token, confirmed=True, reconciled=True)
+        client.call.assert_called_once()
+        client.call.side_effect = None
+        result = execution.execute(self.job.pk, execution.review_token(self.job), confirmed=True, reconciled=True)
+        self.assertEqual(result.status, "completed")
+        first.refresh_from_db()
+        self.assertIsNotNone(first.reconciled_at)
 
     def test_tool_error_preserves_response_and_no_automatic_retry(self):
         token = self.ready()

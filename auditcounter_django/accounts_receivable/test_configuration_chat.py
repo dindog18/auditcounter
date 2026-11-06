@@ -74,7 +74,7 @@ class ConfigurationChatTests(TestCase):
                     self.assertNotIn(old_topic, json.dumps(configuration.snapshot(row)))
                     # Reloaded page uses the cleared record, not the old browser draft.
                     slug = 'accounts-payable' if mode == 'ap' else 'accounts-receivable'
-                    page = self.client.get(f'/{slug}/configuration/{row.pk}/')
+                    page = self.client.get(f'/{slug}/configuration/{row.pk}/', follow=True)
                     profile = next(item for item in page.context['finance_state']['profiles'] if item['id'] == row.pk)
                     self.assertEqual(profile['assistant_messages'], [])
                     self.assertEqual(profile['description'], '')
@@ -426,7 +426,7 @@ class ConfigurationChatTests(TestCase):
                     result = response.json()
                     self.assertEqual([entry['key'] for entry in result['catalog']], [target])
                     self.assertIn('source_table' if source == 'database' else 'extraction_context', result['parameters'])
-                    if target in ('customer', 'supplier', 'payment'):
+                    if target in ('customer', 'supplier', 'payment', 'deduction'):
                         self.assertEqual(result['catalog'][0]['lineFields'], [])
                         self.assertNotIn('line_item_context', result['parameters'])
                     else:

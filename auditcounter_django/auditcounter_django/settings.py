@@ -23,6 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load .env before reading database, Django, or other environment settings.
 # Explicit process variables still take precedence (for CI and deployment).
 load_project_env()
+HELP_ASSISTANT_ENABLED = os.getenv("HELP_ASSISTANT_ENABLED", "").strip().lower() == "true"
 RECONCILIATION_PRICE_TOLERANCE = Decimal(os.getenv("RECONCILIATION_PRICE_TOLERANCE", "0.01"))
 
 # Extraction progress and tracebacks appear in the terminal running Django.
@@ -93,6 +94,18 @@ INSTALLED_APPS = [
     "db_extraction.apps.DbExtractionConfig",
     "accounts_payable.apps.AccountsPayableConfig",
     "accounts_receivable.apps.AccountsReceivableConfig",
+    "company_purchase_order",
+    "supplier_delivery_receipt",
+    "supplier_sales_invoice",
+    "company_payment",
+    "customer_purchase_order",
+    "company_delivery_receipt",
+    "company_sales_invoice",
+    "customer_payment",
+    "ap_deduction",
+    "ar_deduction",
+    "ap_recon",
+    "ar_recon",
     "router.apps.RouterConfig",
     "encoder.apps.EncoderConfig",
 ]

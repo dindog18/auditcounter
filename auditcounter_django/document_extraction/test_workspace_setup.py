@@ -41,7 +41,7 @@ class WorkspaceSetupTests(TestCase):
         self.assertNotContains(self.client.get("/accounts-receivable/"), "Accounts receivable needs setup.")
         response = self.client.get(reverse("ENCODER:dashboard"))
         self.assertEqual(response.context["setup_current"]["key"], "ENCODER")
-        self.assertContains(response, "Encoder needs setup.")
+        self.assertContains(response, "MCP Encoder needs setup.")
         self.save([], preference.updated_at.isoformat())
         response = self.client.get(reverse("setup"))
         self.assertEqual(response.context["setup_missing"], 0)
@@ -65,11 +65,11 @@ class WorkspaceSetupTests(TestCase):
 
     def test_encoder_get_pages_have_contextual_help_and_other_routes_keep_specific_guides(self):
         paths = {
-            "/encoder/": "Encoder document queue", "/encoder/jobs/123/": "Encoder document workspace",
+            "/encoder/": "MCP Encoder document queue", "/encoder/jobs/123/": "MCP Encoder document workspace",
             "/encoder/connections/": "MCP connections", "/encoder/connections/new/": "Configure an MCP connection",
             "/encoder/connections/123/edit/": "Configure an MCP connection", "/encoder/connections/123/": "Review MCP tools",
-            "/encoder/connections/123/mappings/tool/": "Reusable Encoder mapping", "/encoder/history/": "Encoder execution history",
-            "/encoder/history/123/": "Encoder execution history", "/databases/123/runs/": "Database extraction history",
+            "/encoder/connections/123/mappings/tool/": "Reusable MCP Encoder mapping", "/encoder/history/": "MCP Encoder execution history",
+            "/encoder/history/123/": "MCP Encoder execution history", "/databases/123/runs/": "Database extraction history",
             "/databases/123/runs/456/": "Database extraction run", "/databases/123/runs/456/tables/789/": "Database table metadata",
             "/databases/123/delete/": "Delete a database connection", "/documents/123/delete/": "Delete a document or extraction",
         }

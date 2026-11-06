@@ -180,7 +180,7 @@ class RoutingPreparationTests(TestCase):
         second = self.run_route()
         job = EncoderJob.objects.get(route__routing_log=second)
         self.assertEqual(job.status, "needs_review")
-        self.assertIn("one matching Encoder rule", job.last_error)
+        self.assertIn("one matching MCP Encoder rule", job.last_error)
         self.assertEqual(job.tool_name, "")
 
     def test_unconfigured_rule_id_is_rejected_before_handoff(self):

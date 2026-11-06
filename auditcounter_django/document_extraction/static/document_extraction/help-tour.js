@@ -77,7 +77,7 @@
   }
 
   trigger.addEventListener('click', () => {
-    previousFocus = document.activeElement;
+    previousFocus = trigger.closest('.dropdown')?.querySelector('[data-bs-toggle="dropdown"]') || document.activeElement;
     steps = guide.steps.filter(step => target(step.selector));
     // A heading gives even an empty register a useful starting point.
     steps.unshift({selector: '#page-content h1', title: guide.title,

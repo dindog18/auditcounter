@@ -1,0 +1,10 @@
+{% extends 'document_extraction/base.html' %}
+{% load static %}
+{% block extra_styles %}<link rel="stylesheet" href="{% static 'document_extraction/setup-preview.css' %}">{% endblock %}
+{% block scripts %}{{ block.super }}<script src="{% static 'document_extraction/setup-preview.js' %}" defer></script>{% endblock %}
+{% block workspace_title %}Guided setup{% endblock %}
+{% block content %}
+  {% include 'document_extraction/includes/setup_preview.html' %}
+  <noscript><p class="alert alert-info">Enable JavaScript to try the guided setup.</p></noscript>
+{% endblock %}
+{% block workspace_footer %}<span>AuditCounter · Guided setup</span>{% endblock %}

@@ -43,6 +43,7 @@ class DatabaseSourceForm(forms.ModelForm):
         self.initial["included_schemas"] = ", ".join(schemas)
         for field in self.fields.values():
             field.widget.attrs["class"] = "form-check-input" if isinstance(field.widget, forms.CheckboxInput) else "form-select" if isinstance(field.widget, forms.Select) else "form-control"
+        self.fields["enabled"].widget.attrs["role"] = "switch"
 
     def clean_included_schemas(self):
         return list(dict.fromkeys(name.strip() for name in self.cleaned_data["included_schemas"].split(",") if name.strip()))

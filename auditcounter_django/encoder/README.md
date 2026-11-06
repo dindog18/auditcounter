@@ -1,6 +1,13 @@
-# Encoder (local MCP MVP)
+# MCP Encoder (local MCP MVP)
 
-Encoder prepares external business operations from **existing routed extraction
+## Module structure
+
+- [urls.py](urls.py), [views.py](views.py) and [middleware.py](middleware.py) serve the `/encoder/` workspace and enforce local access.
+- [models.py](models.py) stores connections, reusable mappings, jobs, chat, execution attempts and reset history.
+- [services/handoff.py](services/handoff.py), [services/mapping.py](services/mapping.py), [services/validation.py](services/validation.py) and [services/chat.py](services/chat.py) prepare and troubleshoot routed drafts.
+- [services/discovery.py](services/discovery.py), [services/mcp_client.py](services/mcp_client.py) and [services/execution.py](services/execution.py) discover permitted tools and handle confirmed execution.
+
+MCP Encoder prepares external business operations from **existing routed extraction
 text**. It does not upload files, run OCR, or change AP/AR extraction. Pages use
 the shared Falcon layout, navigation, Django forms, CSRF controls, and original
 file preview. All provider calls and writes use POST; GET/HEAD are read-only.
@@ -21,7 +28,7 @@ Set these in `auditcounter_django/.env`, then restart Django:
 ENCODER_LOCAL_ENABLED=true
 ```
 
-In **Encoder → MCP connections → Add connection**, enter the server executable,
+In **MCP Encoder → MCP connections → Add connection**, enter the server executable,
 JSON argument list (for example `["/absolute/path/to/erp_mcp.py"]`), optional working
 directory and environment variables as a secret JSON object such as
 `{"ERP_API_KEY":"value"}`. Use the target server's documented configuration.
@@ -42,7 +49,7 @@ configuration. The server receives the SDK's small standard environment plus the
 explicit variables. Legacy `ENCODER_STDIO_SERVERS` profiles remain readable for
 existing connections; editing them replaces the profile with frontend-managed details.
 
-No new login, OAuth, roles, or AuditCounter token is required. Encoder is disabled by
+No new login, OAuth, roles, or AuditCounter token is required. MCP Encoder is disabled by
 default. When enabled, middleware checks both the actual peer and Host for
 loopback, independent of forwarded headers. Bind Django to `127.0.0.1`; do not
 publish or reverse proxy these unauthenticated pages. Local process/connection
@@ -55,11 +62,11 @@ Configure those just as for AP/AR configuration chat. No paid API is used in tes
 
 ## Use
 
-1. Open **Encoder → MCP connections**, add a connection by entering its local server details, and **Test and save connection**. Inspect schemas and explicitly
+1. Open **MCP Encoder → MCP connections**, add a connection by entering its local server details, and **Test and save connection**. Inspect schemas and explicitly
    permit intended encoding operations. Discovery never grants permission or
    invokes a business tool; removed/changed tool definitions lose approval.
-2. In the existing Router, add a destination with module **Encoder**, target
-   **Encoder job**. In its routing rule, choose the **MCP connection** and
+2. In the existing Router, add a destination with module **MCP Encoder**, target
+   **MCP Encoder job**. In its routing rule, choose the **MCP connection** and
    **Permitted operation**, alongside the normal human routing instructions.
    Only enabled connections and explicitly permitted discovered tools appear.
 3. Upload/extract/review through Document Extraction and run normal routing.
@@ -69,9 +76,9 @@ Configure those just as for AP/AR configuration chat. No paid API is used in tes
    the job's troubleshooting conversation. Unknown values stay missing and flagged.
    A failed handoff
    uses the existing Router retry path. Approve the source document and current
-   route before execution. Encoder drafts can still be rejected/reopened in Router;
+   route before execution. MCP Encoder drafts can still be rejected/reopened in Router;
    processing/completed external jobs remain locked against route changes.
-4. Open the prepared draft from Router or Encoder's queue. Review its routed
+4. Open the prepared draft from Router or MCP Encoder's queue. Review its routed
    operation and continue troubleshooting to supply missing values. Choose source
    paths/defaults/transforms or ask the contextual assistant for a correction.
    Required and optional fields are
@@ -91,7 +98,7 @@ Configure those just as for AP/AR configuration chat. No paid API is used in tes
 Reusable mappings are unique per connection/tool. Workspace source selectors show
 existing JSON paths; a Markdown extraction exposes `text` for contextual AI mapping.
 No second OCR or new document extraction log is created. Original routed text and
-extraction foreign keys remain on Router's immutable input snapshot; Encoder stores
+extraction foreign keys remain on Router's immutable input snapshot; MCP Encoder stores
 the separately prepared payload, and every execution stores its own submitted copy.
 
 ```json
@@ -118,14 +125,14 @@ apply. AI accuracy still requires human review.
 
 Routing snapshots retain the connection, operation and matching rule so later rule
 edits cannot change an existing job. Multiple rules can select different operations
-for the Encoder destination; the router must identify the matching rule. Ambiguous
+for the MCP Encoder destination; the router must identify the matching rule. Ambiguous
 responses stop for review. Initial AI preparation is labelled **Prepared automatically**;
 later chat corrections still require Apply. No preparation path invokes an MCP business
 tool. Handoff/request replay never regenerates an existing draft or repeats its AI call.
 Provider failures leave a reviewable draft and a failed LLM activity entry.
 
 Existing rules/drafts without an operation keep the manual selector. Edit and save
-an existing Encoder rule to enable automatic preparation for future routing attempts.
+an existing MCP Encoder rule to enable automatic preparation for future routing attempts.
 Changes do not retroactively process old jobs. If the selected connection or permission
 is unavailable, fix the rule/connection and rerun routing; existing jobs retain their
 original configuration. Concurrent user edits invalidate an in-flight AI preparation.
@@ -134,16 +141,19 @@ original configuration. Concurrent user edits invalidate an in-flight AI prepara
 
 Requests use signed, expiring payload confirmations and unique request IDs;
 reposting the same confirmation returns its prior attempt without another call.
-A job cannot execute concurrently or execute again after completion. Each explicit
-retry creates a separate attempt. There are no automatic mutation retries.
+Only one external operation can be in progress for a source document. A
+completed job cannot execute again. Each explicit retry creates a separate attempt. There are no automatic mutation retries.
 
 Timeouts, lost connections during a call, and tool-reported errors are recorded as
 **unknown outcome**, since the ERP may already have changed. A retry requires either:
 
-- an identical connection/tool/payload with a **documented** idempotency string
-  parameter configured in Reusable mapping (Encoder supplies the stable job UUID); or
-- explicit confirmation that the user checked the ERP and the prior call did not
-  succeed. The reconciliation timestamp is retained on prior unknown attempts.
+- the same job with an unchanged connection, tool schema and payload, and a
+  **documented** idempotency string parameter configured in Reusable mapping
+  (MCP Encoder supplies the stable job UUID); or
+- explicit confirmation that the user checked the ERP and none of the listed
+  uncertain attempts succeeded. The list includes attempts from earlier routes
+  for the same source document. Older attempts without a saved retry fingerprint
+  also require this check.
 
 Never configure an arbitrary string field as an idempotency key. Actual deduplication
 is the target server's responsibility. Changed payloads after unknown outcomes also
@@ -220,15 +230,15 @@ Clear checkbox to remove saved secrets.
 
 ## Setup and page help
 
-Activate Encoder in Settings & setup to include its checklist in reminders.
+Activate MCP Encoder in Settings & setup to include its checklist in reminders.
 Checks cover local access, a tested MCP connection, permitted operations, shared
-assistant configuration and an Encoder routing destination/rule. Secret key
+assistant configuration and an MCP Encoder routing destination/rule. Secret key
 storage is optional until you need encrypted credentials. Checks use local
 metadata only and never invoke a provider or MCP server, or decrypt stored secrets.
 The Help button has dedicated tours for the queue, job workspace, connection
 list/form/tool permissions, reusable mappings and execution history. Module
 activation here is a workspace-wide reminder preference, not an execution or
-permission bypass. Encoder has its own Encoding & integrations sidebar group.
+permission bypass. MCP Encoder has its own Encoding & integrations sidebar group.
 
 ## Contextual chat and LLM activity
 
@@ -247,7 +257,7 @@ reported input/output tokens and a link to each attempt. Prompt shortcuts and
 Retry fill the composer for review; they never send or execute automatically.
 Corrections must still be inspected and applied explicitly, then validated.
 
-Encoder → LLM activity lists assistant attempts with status, token counts and
+MCP Encoder → LLM activity lists assistant attempts with status, token counts and
 elapsed milliseconds. Open an attempt to inspect its exact request/response and
 sanitized error. Requests use the existing CONFIG_ASSISTANT provider adapter and
 shared token-usage parser. Truncated or invalid suggestions and provider failures

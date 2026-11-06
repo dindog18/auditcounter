@@ -1,1 +1,1 @@
-"""Encoder business services; no document extraction or automatic mutations."""
+"""MCP Encoder business services; no document extraction or automatic mutations."""

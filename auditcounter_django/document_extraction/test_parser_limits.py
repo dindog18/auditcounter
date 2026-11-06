@@ -163,12 +163,11 @@ class ParserLimitTests(SimpleTestCase):
             pdf.save(path, deflate=True)
         return path
 
-    def test_dense_single_path_and_rectangles_rejected_before_table_detection(self):
+    def test_dense_single_path_and_rectangles_extract_text_without_table_detection(self):
         for rectangles in (False, True):
             path = self.grid(rectangles=rectangles)
             with patch.object(pymupdf.Page, 'find_tables') as parser:
-                with self.assertRaisesMessage(ValueError, 'table-complexity'):
-                    documents.extract_pdf_to_markdown(path)
+                self.assertIn('Invoice 100', documents.extract_pdf_to_markdown(path))
                 parser.assert_not_called()
 
     def test_page_and_cumulative_limits(self):
@@ -183,9 +182,30 @@ class ParserLimitTests(SimpleTestCase):
             parser.assert_not_called()
         path = self.grid(lines=3)
         with patch.object(limits, 'MAX_DOCUMENT_EDGES', 1), patch.object(pymupdf.Page, 'find_tables') as parser:
-            with self.assertRaisesMessage(ValueError, 'document table-complexity'):
-                documents.extract_pdf_to_markdown(path)
+            self.assertIn('Invoice 100', documents.extract_pdf_to_markdown(path))
             parser.assert_not_called()
+
+    def test_fragmented_filled_borders_preserve_markdown_cells(self):
+        path = self.folder / 'fragmented.pdf'
+        with pymupdf.open() as pdf:
+            page = pdf.new_page()
+            shape = page.new_shape()
+            for x in (40, 140, 240, 340):
+                for y in range(40, 160, 4):
+                    shape.draw_rect(pymupdf.Rect(x, y, x + 0.3, y + 4))
+            for y in (40, 80, 120, 160):
+                for x in range(40, 340, 4):
+                    shape.draw_rect(pymupdf.Rect(x, y, x + 4, y + 0.3))
+            shape.finish(color=None, fill=(0, 0, 0))
+            shape.commit()
+            for y, row in [(60, ('Order', 'Item', 'Amount')), (100, ('PO-001', 'Widget', '100'))]:
+                for x, value in zip((45, 145, 245), row):
+                    page.insert_text((x, y), value)
+            self.assertGreater(limits.pdf_edge_cost(page.get_drawings()), limits.MAX_PAGE_EDGES)
+            pdf.save(path)
+        result = documents.extract_pdf_to_markdown(path)
+        self.assertIn('| Order | Item | Amount |', result)
+        self.assertIn('| PO-001 | Widget | 100 |', result)
 
     def test_ordinary_table_and_rotated_table_preserve_cells(self):
         for rotation in (0, 90):

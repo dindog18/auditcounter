@@ -11,6 +11,10 @@ from ..utils.markdown import markdown_table
 from . import parser_limits
 
 
+class PDFExtractionError(ValueError):
+    """A PDF that cannot be extracted within the supported limits."""
+
+
 async def document_file_text_extraction(stored_file: StoredFileMetadata) -> str:
     """Extract a supported document and return its contents as Markdown.
 
@@ -46,13 +50,24 @@ def extract_pdf_to_markdown(file_path: Path) -> str:
     parser_limits.check_file_size(file_path)
     with pymupdf.open(file_path) as pdf:
         if len(pdf) > parser_limits.MAX_PDF_PAGES:
-            raise ValueError('PDF exceeds the 100-page extraction limit. Split this PDF.')
+            raise PDFExtractionError('PDF exceeds the 100-page extraction limit. Split this PDF.')
         total_edges = 0
         for page_number, page in enumerate(pdf, start=1):
-            total_edges += parser_limits.pdf_edge_cost(page)
-            if total_edges > parser_limits.MAX_DOCUMENT_EDGES:
-                raise ValueError('PDF exceeds the document table-complexity limit. Split this PDF.')
-            tables = page.find_tables().tables
+            drawings = page.get_drawings()
+            edge_cost = parser_limits.pdf_edge_cost(drawings)
+            tables = []
+            if (edge_cost <= parser_limits.MAX_PAGE_EDGES
+                    and total_edges + edge_cost <= parser_limits.MAX_DOCUMENT_EDGES):
+                total_edges += edge_cost
+                tables = page.find_tables().tables
+            elif edge_cost > parser_limits.MAX_PAGE_EDGES and page.rotation == 0:
+                grid = parser_limits.compact_pdf_grid(drawings)
+                grid_cost = 4 * len(grid)
+                if grid and total_edges + grid_cost <= parser_limits.MAX_DOCUMENT_EDGES:
+                    total_edges += grid_cost
+                    tables = page.find_tables(paths=[], add_lines=grid).tables
+            # Dense drawings can make table detection expensive. The text
+            # below still extracts each visual row from the PDF text layer.
             regions = []
             elements = []
             for table in tables:
@@ -104,10 +119,10 @@ def extract_pdf_to_markdown(file_path: Path) -> str:
                 )
                 if not page.get_image_info() and not visible_drawing and pixels.count(255) == len(pixels):
                     continue
-                raise ValueError(f'Page {page_number} has no extractable text. Use OCR for scanned PDFs.')
+                raise PDFExtractionError(f'Page {page_number} has no extractable text. Use OCR for scanned PDFs.')
             parts.append(f'## Page {page_number}\n\n{content}')
     if not parts:
-        raise ValueError('This PDF has no extractable text. Use OCR for scanned PDFs.')
+        raise PDFExtractionError('This PDF has no extractable text. Use OCR for scanned PDFs.')
     return '\n\n'.join(parts).strip()
 
 

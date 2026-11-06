@@ -20,8 +20,8 @@ def rule(row):
 
 
 def route(row):
-    from accounts_receivable.services.catalog import TARGETS, model
-    mode = {"accounts_payable": "ap", "accounts_receivable": "ar"}.get(row.destination.module_name)
+    from accounts_receivable.services.catalog import TARGETS, accounting_mode, model
+    mode = accounting_mode(row.destination.module_name, row.destination.target_model)
     profiles = []
     record_url = ""
     history_url = ""
@@ -35,7 +35,7 @@ def route(row):
         if log:
             history_url = base + f"llm-logs/{log.pk}/"
             record_id = getattr(log, target+"_id", None) if target is not None else None
-            resource = {"customer": "customers", "supplier": "suppliers", "purchase_order": "purchase-orders", "delivery_receipt": "delivery-receipts", "sales_invoice": "invoices", "payment": "payments"}.get(target)
+            resource = {"customer": "customers", "supplier": "suppliers", "purchase_order": "purchase-orders", "delivery_receipt": "delivery-receipts", "sales_invoice": "invoices", "payment": "payments", "deduction": "deductions"}.get(target)
             if record_id and resource:
                 record_url = base + f"{resource}/{record_id}/"
     if row.destination.module_name == "encoder":

@@ -19,7 +19,7 @@ from . import mapping
 
 logger = logging.getLogger(__name__)
 
-SYSTEM = '''You help prepare and troubleshoot ONE Encoder document job. Never execute tools or
+SYSTEM = '''You help prepare and troubleshoot ONE MCP Encoder document job. Never execute tools or
 claim that you saved data, applied corrections, or changed an external system.
 Return JSON matching the provided response schema: message, optional complete payload,
 optional mappings, and issues. Propose only values supported by document evidence or explicit
@@ -74,7 +74,7 @@ def ask(job_id, message, *, preparation=False, revision=None):
         if len(content) > int(get_env(f"{prefix}_MAX_INPUT_CHARACTERS", "150000")):
             raise ValueError("Job context exceeds CONFIG_ASSISTANT_MAX_INPUT_CHARACTERS. Reduce the conversation or use manual correction.")
         config = RoutingSettings(provider, model, 1, timeout, 1, len(content), tokens)
-        # Reuse the existing native provider body builder; substitute Encoder's system instruction.
+        # Reuse the existing native provider body builder; substitute MCP Encoder's system instruction.
         _, body = request_payload(config, "", [])
         if provider == "anthropic":
             body.update(system=SYSTEM, messages=[{"role": "user", "content": content}])
@@ -128,7 +128,7 @@ def ask(job_id, message, *, preparation=False, revision=None):
             setattr(answer, key, value)
         answer.processing_time_ms = round((perf_counter() - started) * 1000)
         answer.save()
-        logger.info("Encoder LLM job=%s message=%s status=%s provider=%s model=%s input_tokens=%s output_tokens=%s duration_ms=%s error_code=%s",
+        logger.info("MCP Encoder LLM job=%s message=%s status=%s provider=%s model=%s input_tokens=%s output_tokens=%s duration_ms=%s error_code=%s",
                     job.pk, answer.pk, answer.status, answer.provider, answer.model_name, answer.input_tokens,
                     answer.output_tokens, answer.processing_time_ms, answer.error_code)
     return answer

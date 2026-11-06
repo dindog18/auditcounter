@@ -1,5 +1,9 @@
 # Document routing
 
+Open `/router/` for the review queue. Routing starts from
+[Documents or Batches](../document_extraction/README.md), and each matched route
+has separate processing and review states.
+
 Routing reads saved extraction text, evaluates active human-configured rules with
 one LLM, and saves zero, one, or multiple `DocumentRoute` decisions per attempt.
 Each successful LLM match automatically invokes AP/AR accounting extraction using
@@ -9,14 +13,14 @@ retained in `route.routing_log.input_text`.
 `services/handoff.py` saves per-route processing status, errors, and completion;
 completed routes are not processed twice. See the [accounting guide](../accounts_receivable/README.md).
 
-Encoder rules additionally select an enabled MCP connection and permitted operation.
-Routing snapshots these settings and passes the matched rule's operation to Encoder.
+MCP Encoder rules additionally select an enabled MCP connection and permitted operation.
+Routing snapshots these settings and passes the matched rule's operation to MCP Encoder.
 The handoff prepares mappings, validates a local draft and, when values are missing,
 starts contextual AI preparation/troubleshooting with persisted LLM usage. The job
 workspace shows the routed operation without asking for it again. External MCP
 execution still requires source/route approval and explicit payload confirmation.
 Legacy rules without a selected operation retain manual drafts until edited/saved.
-If several Encoder rules use different operations, the LLM must return the matching
+If several MCP Encoder rules use different operations, the LLM must return the matching
 `rule_no` as `rule_id`; unknown IDs fail validation and ambiguous selections stop
 for review. AP/AR handoff behavior is unchanged.
 
@@ -112,7 +116,13 @@ the warning explicitly states that ALL associated routing rules will also be
 deleted. Confirmation removes the destination and rules together in one
 transaction. It is a CSRF-protected POST and checks the current record revision.
 
-Past rule snapshots, routes, source documents and AP/AR or Encoder records are
+Past rule snapshots, routes, source documents and AP/AR or MCP Encoder records are
 retained. Deleted destinations are kept as inactive historical references, hidden
 from configuration, and cannot be re-enabled or edited through the UI. A new
 destination for the same module/model may be created with a fresh identity.
+
+## Accounting document apps
+
+Accounting documents now live in independent AP and AR Django apps. See the
+[document app architecture and migration guide](../../docs/accounting-document-apps.md)
+for model ownership, compatibility and migration details.

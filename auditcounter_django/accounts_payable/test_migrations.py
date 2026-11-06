@@ -11,15 +11,16 @@ from django.test import TransactionTestCase
 class SimplificationMigrationTests(TransactionTestCase):
     def test_notes_charges_and_statuses_survive_simplification(self):
         executor = MigrationExecutor(connection)
+        latest = executor.loader.graph.leaf_nodes()
         after = [
-            node for node in executor.loader.graph.leaf_nodes()
-            if node[0] in ("accounts_payable", "accounts_receivable")
+            ("accounts_payable", "0012_preserve_configuration_history"),
+            ("accounts_receivable", "0011_preserve_configuration_history"),
         ]
         before = [
             ("accounts_payable", "0007_companypayment_ap_payment_source_record_uq_and_more"),
             ("accounts_receivable", "0006_companydeliveryreceipt_ar_dr_source_record_uq_and_more"),
         ]
-        self.addCleanup(lambda: MigrationExecutor(connection).migrate(after))
+        self.addCleanup(lambda: MigrationExecutor(connection).migrate(latest))
         executor.migrate(before)
         historical = executor.loader.project_state(before).apps
         supplier = historical.get_model("accounts_payable", "Supplier").objects.create(

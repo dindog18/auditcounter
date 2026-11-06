@@ -1,0 +1,79 @@
+<section class="card mb-4 setup-preview" id="setup-preview" data-workspace-url="{% url 'DOC_EXTRACTION:document_list' %}" aria-labelledby="setup-preview-title" hidden>
+  <div class="card-header d-flex flex-wrap gap-3 justify-content-between align-items-start">
+    <div><h2 class="fs-7 mb-1" id="setup-preview-title">Guided setup</h2>
+    <p class="mb-0 text-700">Choose a workflow and configure its records, document routing, and MCP Encoder.</p></div>
+  </div>
+  <div class="setup-preview-grid">
+    <nav aria-label="Setup progress"><ol class="list-unstyled mb-0" data-progress></ol></nav>
+    <div class="p-4 setup-preview-body">
+      <p class="text-700 fs-10" data-progress-note>Wizard progress is saved in this browser. Setup links open the standard workspace screens in a new tab.</p>
+      <p class="text-700 fs-10" data-storage-status role="status"></p>
+      <div data-panel></div>
+      <div class="d-flex flex-wrap gap-2 justify-content-between mt-4" data-actions></div>
+      <div class="visually-hidden" aria-live="polite" data-announcement></div>
+    </div>
+  </div>
+  {{ setup_preview_routes|json_script:"setup-preview-routes" }}
+  {{ guided_setup_readiness|json_script:"guided-setup-readiness" }}
+  <template data-database-links>
+    <a class="btn btn-outline-primary" href="{% url 'DB_EXTRACTION:source_create' %}" target="_blank" rel="noopener">Add PostgreSQL connection</a>
+    <a class="btn btn-link" href="{% url 'DB_EXTRACTION:source_list' %}" target="_blank" rel="noopener">Open saved connections</a>
+  </template>
+  {% for group in setup_groups %}
+    {% if group.key == 'ROUTER' or group.key == 'ENCODER' %}
+      <template data-integration="{{ group.key }}">
+        {% if group.key == 'ENCODER' %}
+          <h4 class="fs-9">Environment (.env)</h4>
+          <ul class="list-unstyled mb-2">
+            {% for step in group.steps %}
+              {% if step.environment %}
+                <li class="mb-2">
+                  <strong>{{ step.title }}</strong>
+                  <span class="badge {% if step.ready %}bg-success{% else %}bg-warning text-dark{% endif %}">
+                    {% if step.ready %}Present{% else %}Needs attention{% endif %}
+                  </span>
+                  <p class="mb-0">{{ step.detail }}</p>
+                </li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+          <p>After updating <code>auditcounter_django/.env</code>, restart Django and refresh this page.</p>
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <a class="btn btn-outline-primary" href="{% url 'ENCODER:connection_create' %}" target="_blank" rel="noopener">Set up MCP connection</a>
+            <a class="btn btn-link" href="{% url 'ENCODER:connections' %}" target="_blank" rel="noopener">Open saved MCP connections</a>
+            <a class="btn btn-link" href="{% url 'ROUTER:destination_create' %}" target="_blank" rel="noopener">Add MCP Encoder destination</a>
+            <a class="btn btn-link" href="{% url 'ROUTER:rule_create' %}" target="_blank" rel="noopener">Add MCP Encoder routing rule</a>
+          </div>
+        {% else %}
+        <ol class="mb-3">
+          {% for step in group.steps %}
+            {% if forloop.first %}
+            <li class="mb-3">
+              <strong>{{ step.title }}</strong>
+              <span class="badge {% if step.ready %}bg-success{% elif step.optional %}bg-secondary{% else %}bg-warning text-dark{% endif %}">
+                {% if step.ready %}Present{% elif step.optional %}Optional{% else %}Needs attention{% endif %}
+              </span>
+              <p class="mb-1">{{ step.detail }}</p>
+              <a href="{{ step.url }}" target="_blank" rel="noopener">{{ step.label }}</a>
+            </li>
+            {% endif %}
+          {% endfor %}
+        </ol>
+          <a class="btn btn-outline-primary mb-3" href="{% url 'ROUTER:destination_create' %}" target="_blank" rel="noopener">Add routing destination</a>
+          <a class="btn btn-outline-primary mb-3" href="{% url 'ROUTER:rule_create' %}" target="_blank" rel="noopener">Add routing rule</a>
+          <a class="btn btn-link mb-3" href="{% url 'ROUTER:rules' %}" target="_blank" rel="noopener">Review routing rules</a>
+        {% endif %}
+      </template>
+    {% endif %}
+  {% endfor %}
+  <template data-prerequisites>
+    {% for group in setup_groups %}
+      {% with step=group.steps.0 %}
+        <li class="mb-2" data-module="{{ group.key }}" data-ready="{{ step.ready|yesno:'yes,no' }}">
+          <strong>{{ group.title }}</strong> · {% if step.ready %}Present{% else %}Needs attention{% endif %}<br>
+          <span class="text-700">{{ step.detail }}</span>
+        </li>
+      {% endwith %}
+    {% endfor %}
+  </template>
+</section>

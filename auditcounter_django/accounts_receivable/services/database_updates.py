@@ -68,6 +68,10 @@ def candidate(mode, config, key, parsed, locked=False):
     Target = model(mode, config.target_entity)
     header = copy(existing) if existing else Target()
     values = values_for(mode, config, parsed['record'], canonical=False)
+    if (existing and values.get('purchase_order', False) is None
+            and values.get('reported_po_reference') == getattr(existing, 'reported_po_reference', None)):
+        # A repeat of the same source spelling must keep the reviewer’s PO link.
+        values.pop('purchase_order')
     for name, value in values.items():
         setattr(header, name, value)
     if config.target_entity not in {'supplier', 'customer'}:

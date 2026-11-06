@@ -82,7 +82,7 @@ def execute(request):
         if statuses:
             message += f" Accounting extraction: {accounting['completed']} completed, {accounting['failed']} failed, {accounting['pending'] + accounting['processing']} waiting."
         if encoder_statuses:
-            message += f" Encoder draft handoff: {encoder['completed']} created, {encoder['failed']} failed. External execution requires review and confirmation."
+            message += f" MCP Encoder draft handoff: {encoder['completed']} created, {encoder['failed']} failed. External execution requires review and confirmation."
         (messages.warning if accounting["failed"] or encoder["failed"] else messages.info)(request, message)
         return {"message": message, "logs": [{"id": row.pk, "status": row.status} for row in logs],
                 "accounting": accounting, "encoder": encoder,
