@@ -1,0 +1,28 @@
+{% load static %}
+<dialog id="help-assistant" class="help-assistant card" aria-labelledby="help-assistant-title"
+  data-page="{{ page_guide.key }}" data-workspace="{{ request.resolver_match.namespace }}">
+  <header class="d-flex align-items-start justify-content-between gap-3">
+    <div>
+      <h2 id="help-assistant-title" class="fs-7 mb-1">Ask AuditCounter</h2>
+      <p class="text-700 mb-0">{{ page_guide.title }} · AI product help</p>
+    </div>
+    <button type="button" class="btn-close p-2" data-help-close aria-label="Close Ask AuditCounter"></button>
+  </header>
+  <div>
+    <div class="help-assistant-messages" role="log" aria-label="Conversation" tabindex="0"></div>
+    <p class="help-assistant-intro text-700 mb-0">Ask about a workflow or where to find a feature.</p>
+  </div>
+  <form action="{% url 'ask_help' %}" method="post">
+    {% csrf_token %}
+    <label class="form-label" for="help-question">How can we help?</label>
+    <textarea class="form-control" id="help-question" rows="2" maxlength="1000"
+      aria-describedby="help-assistant-privacy" placeholder="For example, how do I correct extracted text?" required></textarea>
+    <p id="help-assistant-privacy" class="fs-10 text-700 mt-2 mb-3">Your question and recent messages go to the configured AI provider. Leave out passwords and business record details.</p>
+    <p class="fs-10 mb-2" data-help-status role="status" hidden></p>
+    <div class="d-flex flex-wrap gap-2 justify-content-between">
+      <button type="button" class="btn btn-sm btn-falcon-default" data-help-clear disabled>Clear conversation</button>
+      <button type="submit" class="btn btn-sm btn-primary">Send</button>
+    </div>
+  </form>
+</dialog>
+<script src="{% static 'document_extraction/help-assistant.js' %}" defer></script>

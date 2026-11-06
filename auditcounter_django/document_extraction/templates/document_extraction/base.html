@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="{% static 'document_extraction/falcon/assets/css/theme.min.css' %}">
   <link rel="stylesheet" href="{% static 'document_extraction/app.css' %}?v=workspace-spacing-1">
   <link rel="stylesheet" href="{% static 'document_extraction/help-tour.css' %}?v=workspace-spacing-1">
+  {% if help_assistant_enabled %}<link rel="stylesheet" href="{% static 'document_extraction/help-assistant.css' %}">{% endif %}
   {% block extra_styles %}{% endblock %}
   <link rel="stylesheet" href="{% static 'document_extraction/brand/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'document_extraction/brand/workspace-theme.css' %}?v=switch-2">
@@ -62,7 +63,17 @@
           <a class="navbar-brand mobile-brand me-auto" href="{% url 'DOC_EXTRACTION:document_list' %}">{% include 'document_extraction/includes/brand.html' %}</a>
           <span class="biz-header-title d-none d-xl-inline me-auto">{% block workspace_title %}Document workspace{% endblock %}</span>
           <button class="btn btn-sm btn-light biz-theme-toggle me-2" type="button" data-theme-toggle aria-label="Switch to dark theme" aria-pressed="false"><span class="fas fa-moon" data-theme-icon aria-hidden="true"></span></button>
-          <button type="button" class="btn btn-sm btn-light biz-help-toggle" data-help-start aria-label="Help on this page" aria-haspopup="dialog" aria-controls="help-tour"><span class="fas fa-question-circle" aria-hidden="true"></span><span class="biz-help-label ms-1">Help</span></button>
+          {% if help_assistant_enabled %}
+            <div class="dropdown">
+              <button type="button" id="workspace-help-menu" class="btn btn-sm btn-light biz-help-toggle" data-bs-toggle="dropdown" aria-label="Help on this page" aria-expanded="false"><span class="fas fa-question-circle" aria-hidden="true"></span><span class="biz-help-label ms-1">Help</span></button>
+              <div class="dropdown-menu dropdown-menu-end" aria-labelledby="workspace-help-menu">
+                <button type="button" class="dropdown-item" data-help-ask aria-haspopup="dialog" aria-controls="help-assistant">Ask AuditCounter</button>
+                <button type="button" class="dropdown-item" data-help-start aria-haspopup="dialog" aria-controls="help-tour">Guided tour</button>
+              </div>
+            </div>
+          {% else %}
+            <button type="button" class="btn btn-sm btn-light biz-help-toggle" data-help-start aria-label="Help on this page" aria-haspopup="dialog" aria-controls="help-tour"><span class="fas fa-question-circle" aria-hidden="true"></span><span class="biz-help-label ms-1">Help</span></button>
+          {% endif %}
         </nav>
         <div id="page-content" tabindex="-1">
           {% for message in messages %}<div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags|default:'info' }}{% endif %}" role="status">{{ message }}</div>{% endfor %}
@@ -76,6 +87,7 @@
     </div>
   </main>
   {% include 'document_extraction/includes/page_help.html' %}
+  {% if help_assistant_enabled %}{% include 'document_extraction/includes/help_assistant.html' %}{% endif %}
   <script src="{% static 'document_extraction/falcon/vendors/popper/popper.min.js' %}"></script>
   <script src="{% static 'document_extraction/falcon/vendors/bootstrap/bootstrap.min.js' %}"></script>
   <script src="{% static 'document_extraction/falcon/vendors/fontawesome/all.min.js' %}"></script>

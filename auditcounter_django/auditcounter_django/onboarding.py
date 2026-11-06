@@ -152,7 +152,7 @@ def workspace_guidance(request):
     namespaces = {"DOC_EXTRACTION", "DB_EXTRACTION", "ROUTER", "ACCOUNTS_PAYABLE", "ACCOUNTS_RECEIVABLE", "ENCODER"}
     if match and match.url_name == "guided_setup":
         guide = for_page(request)
-        return {"page_help_title": guide["title"], "page_guide": guide}
+        return {"page_help_title": guide["title"], "page_guide": guide, "help_assistant_enabled": settings.HELP_ASSISTANT_ENABLED}
     if not match or (match.namespace not in namespaces and match.url_name != "setup"):
         return {}
     if "/api/" in request.path:
@@ -163,7 +163,8 @@ def workspace_guidance(request):
     help_content = for_page(request)
     return {"setup_groups": groups, "setup_columns": [groups[::2], groups[1::2]], "setup_missing": sum(group["missing"] for group in groups if group["active"]),
             "setup_current": current if current and current["active"] else None,
-            "setup_preferences_revision": preference.updated_at.isoformat() if preference else "", "page_help_title": help_content["title"], "page_guide": help_content}
+            "setup_preferences_revision": preference.updated_at.isoformat() if preference else "", "page_help_title": help_content["title"], "page_guide": help_content,
+            "help_assistant_enabled": settings.HELP_ASSISTANT_ENABLED}
 
 
 @require_GET

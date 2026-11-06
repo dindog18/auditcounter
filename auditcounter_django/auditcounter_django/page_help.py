@@ -102,6 +102,8 @@ GUIDES = {
     "reconciliation": tour("Reconciliation", SEARCH, TABLE,
         ("#page-content form", "Build a case", "Choose one account, the currency and related documents, including at least one invoice."), SAVE,
         ('#page-content a[href$="/match/"]', "Match the lines", "Compare order, receipt and invoice lines after saving the case.")),
+    "po_reconciliation": tour("PO reconciliation", SEARCH, TABLE,
+        ("#page-content", "Review the purchase order case", "Each purchase order has an automatic case. Open it to check linked documents, line differences, deductions and cleared payments.")),
     "match": tour("Match document lines",
         ("[data-order], [data-receipt], [data-match-invoice]", "Connect related lines", "Select lines describing the same goods across the documents in this case."),
         ("[data-quantity]", "Set the matched quantity", "Enter the quantity being compared. Check differences against the original evidence."), SAVE),
@@ -205,8 +207,10 @@ def for_page(request):
             key = "allocate"
         elif name == "reconciliation_match":
             key = "match"
+        elif name.startswith("po_reconciliation"):
+            key = "po_reconciliation"
         elif name.startswith("configuration"):
             key = "configurations" if name.endswith("_list") else "configuration_form"
         else:
             key = next((value for prefix, value in {"party": "parties", "purchase_order": "orders", "delivery_receipt": "deliveries", "invoice": "invoices", "payment": "payments", "reconciliation": "reconciliation", "aging": "aging", "llm_log": "logs", "overview": "overview"}.items() if name.startswith(prefix)), "overview")
-    return GUIDES[key]
+    return {**GUIDES[key], "key": key}

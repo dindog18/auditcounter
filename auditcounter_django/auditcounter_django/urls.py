@@ -16,6 +16,7 @@ Including another Urlconf
 """
 
 from .onboarding import guided_setup, setup, save_modules, setup_preview
+from document_extraction.help_views import ask_help
 from django.contrib import admin
 from django.urls import path, include
 
@@ -25,6 +26,7 @@ urlpatterns = [
     path("setup-preview/", setup_preview, name="setup_preview"),
     path("setup/", setup, name="setup"),
     path("setup/modules/", save_modules, name="setup_modules"),
+    path("help/ask/", ask_help, name="ask_help"),
     path("admin/", admin.site.urls),
     path("accounts-receivable/", include("accounts_receivable.urls")),
     path("accounts-payable/", include("accounts_payable.urls")),
