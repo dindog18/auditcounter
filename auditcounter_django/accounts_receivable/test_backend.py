@@ -315,7 +315,7 @@ class BackendTests(TestCase):
         for mode,base in [('ar','accounts-receivable'),('ap','accounts-payable')]:
             self.account(mode);self.config(mode);route=self.route(mode);self.respond(self.output(mode));process(route.pk)
             for path in ['', 'configuration/', 'configuration/1/', 'llm-logs/', 'invoices/', 'invoices/1/', 'aging/']:
-                response=self.client.get(f'/{base}/{path}')
+                response=self.client.get(f'/{base}/{path}', follow=True)
                 self.assertEqual(response.status_code,200,path)
                 self.assertNotContains(response,'accounting/demo-data.js')
             data=pages.workspace_state(mode,'overview')
