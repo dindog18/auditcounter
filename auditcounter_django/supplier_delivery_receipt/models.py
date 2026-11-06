@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 class SupplierDeliveryReceipt(models.Model):
     """Goods received from the supplier. Accepted quantities are recorded on its lines."""
 
+    reported_po_reference = models.CharField("PO reference printed on the document", max_length=100, blank=True)
     purchase_order = models.ForeignKey(
         "company_purchase_order.CompanyPurchaseOrder", on_delete=models.PROTECT, null=True, blank=True,
         related_name="delivery_receipts",

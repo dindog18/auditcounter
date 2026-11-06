@@ -8,6 +8,24 @@ from django.shortcuts import get_object_or_404
 from accounts_receivable.services.catalog import check_revision, model, party_key
 
 
+def model_variance(invoice_line, order_line, receipt_line):
+    codes = [line.item_code for line in (order_line, receipt_line, invoice_line)]
+    units = [line.unit_of_measure for line in (order_line, receipt_line, invoice_line)]
+    if len(set(codes)) > 1 or len(set(units)) > 1 or not all(value.strip() for value in codes + units):
+        evidence = [f'{code or "missing model"} / {unit or "missing unit"}' for code, unit in zip(codes, units)]
+        return f'PO: {evidence[0]} · Delivery: {evidence[1]} · Invoice: {evidence[2]}'
+    return ''
+
+
+def validate_identity(invoice_line, order_line, receipt_line):
+    from .references import same_reference
+
+    codes = [line.item_code for line in (order_line, receipt_line, invoice_line) if line.item_code.strip()]
+    if codes and any(code != codes[0] and not same_reference(code, codes[0]) for code in codes):
+        raise ValidationError('Different models cannot share a line allocation. Correct the source or select the correct lines.')
+    validate_units(invoice_line, order_line, receipt_line)
+
+
 def validate_units(invoice_line, order_line, receipt_line):
     units = {line.unit_of_measure.strip().casefold() for line in (invoice_line, order_line, receipt_line)}
     if len(units - {''}) > 1:
@@ -40,6 +58,7 @@ def save_review(mode, case_id, data):
     quantity_field = Match._meta.get_field('matched_quantity')
     order_ids, receipt_ids, pairs = set(), set(), set()
     quantities = []
+    notes = []
     for row in rows:
         if not isinstance(row, dict) or any(type(row.get(key)) is not int for key in ('orderLineId', 'receiptLineId')):
             raise ValidationError('Choose a purchase order line and an accepted delivery line for each match.')
@@ -50,6 +69,10 @@ def save_review(mode, case_id, data):
         quantity = quantity_field.clean(row.get('quantity'), None)
         if quantity <= 0:
             raise ValidationError('Matched quantity must be positive.')
+        note = row.get('note', '')
+        if not isinstance(note, str) or len(note.strip()) > 500:
+            raise ValidationError('Enter a line review note of up to 500 characters.')
+        notes.append(note.strip())
         quantities.append(quantity)
         order_ids.add(row['orderLineId'])
         receipt_ids.add(row['receiptLineId'])
@@ -92,11 +115,14 @@ def save_review(mode, case_id, data):
             review_case.purchase_orders.add(order)
         review_case.sales_invoices.add(invoice_line.invoice)
         review_case.delivery_receipts.add(*(line.delivery_receipt_id for line in receipts.values()))
-        for row, quantity in zip(rows, quantities):
-            validate_units(invoice_line, orders[row['orderLineId']], receipts[row['receiptLineId']])
+        for row, quantity, note in zip(rows, quantities, notes):
+            order_line, receipt_line = orders[row['orderLineId']], receipts[row['receiptLineId']]
+            validate_identity(invoice_line, order_line, receipt_line)
+            if model_variance(invoice_line, order_line, receipt_line) and not note:
+                raise ValidationError('Explain how you verified the model or unit difference in the review note.')
             Match.objects.create(transaction=review_case, invoice_line=invoice_line,
                                  purchase_order_line=orders[row['orderLineId']],
                                  delivery_receipt_line=receipts[row['receiptLineId']],
-                                 matched_quantity=quantity, match_status='matched')
+                                 matched_quantity=quantity, match_status='matched', notes=note)
     case.refresh()
     return case

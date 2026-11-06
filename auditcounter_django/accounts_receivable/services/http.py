@@ -21,6 +21,14 @@ def perform(request, mode, action, record_id=None):
             from accounting_documents.line_review import save_review
             case = save_review(mode, record_id, data)
             return JsonResponse({'id': case.pk, 'status': case.status})
+        if action == 'po-delivery-review' and record_id:
+            from accounting_documents.delivery_review import save_delivery_review
+            case = save_delivery_review(mode, record_id, data)
+            return JsonResponse({'id': case.pk, 'status': case.status})
+        if action == 'po-reference-review' and record_id:
+            from accounting_documents.references import save_reference_review
+            case = save_reference_review(mode, record_id, data)
+            return JsonResponse({'id': case.pk, 'status': case.status})
         if action == 'document-po' and record_id:
             record = records.link_purchase_order(mode, record_id, data)
             return JsonResponse({'id': record.pk, 'purchaseOrderId': record.purchase_order_id})

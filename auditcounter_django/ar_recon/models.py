@@ -16,6 +16,8 @@ class Reconciliation(models.Model):
     outstanding = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     difference = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     issues = models.JSONField(default=list, blank=True)
+    reference_reviews = models.JSONField(default=dict, blank=True)
+    delivery_reviews = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

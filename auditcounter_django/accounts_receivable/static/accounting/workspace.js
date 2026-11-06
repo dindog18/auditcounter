@@ -306,7 +306,7 @@
         field('phone', 'Phone', draft.phone) + field('taxId', 'Tax identification no.', draft.taxId) +
         field('terms', 'Payment terms (days)', draft.terms, 'number', {required:true, step:'1'}) +
         (ar ? field('creditLimit', 'Credit limit (PHP)', draft.creditLimit, 'number') : '') +
-        field('status', 'Account status', draft.status, 'text', {choices:statuses.parties}) +
+        `<div class="finance-field form-check form-switch"><input class="form-check-input" id="party-active" name="status" type="checkbox" role="switch" value="active" ${draft.status === 'active' ? 'checked' : ''}><label class="form-check-label" for="party-active">Active account</label></div>` +
         field('address', 'Billing address', draft.address, 'textarea', {full:true}) +
         (ar ? field('shippingAddress', 'Shipping address', draft.shippingAddress, 'textarea', {full:true}) : '');
     } else {
@@ -330,6 +330,7 @@
       for (const [key,value] of values) next[key] = typeof value === 'string' ? value.trim() : value;
       if (resource === 'parties' && data[resource].some(row => row.id !== record?.id && row.reference.toLowerCase() === next.reference.toLowerCase() && (resource === 'parties' || row.partyId === Number(next.partyId)))) return showError('This reference already exists for this account. Use a unique reference.');
       if (resource === 'parties') {
+        next.status = values.has('status') ? 'active' : 'inactive';
         next.terms = Number(next.terms);
         next.creditLimit = Number(next.creditLimit || 0);
       } else {

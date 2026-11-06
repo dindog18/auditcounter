@@ -74,6 +74,7 @@ def document(row, target, mode):
               "clearedAt": text_date(getattr(row, "cleared_at", None)), "reversedAt": text_date(getattr(row, "reversed_at", None)),
               "reversalReason": getattr(row, "reversal_reason", ""), "notes": getattr(row, "notes", next((getattr(row, field.name) for field in row._meta.fields if field.name.endswith("_context")), "")),
               "isManual": is_manual(row), "purchaseOrderId": getattr(row, "purchase_order_id", None),
+              "reportedPO": getattr(row, "reported_po_reference", ""),
               "source": source, "sourceName": row.source_document.file_name if row.source_document_id else f"{row.source_table.schema.name}.{row.source_table.name}" if row.source_table_id else "",
               "sourceUrl": f"/documents/{row.source_document_id}/" if row.source_document_id else f"/databases/{row.source_database_id}/" if row.source_database_id else "/documents/",
               "databaseName": row.source_database.name if row.source_database_id else "", "sourceKey": json.dumps(row.source_record_key),
@@ -137,7 +138,7 @@ def workspace_state(mode, resource, record_id=None, setup_target=None):
     for case in model(mode, 'POReconciliation').objects.select_related('purchase_order'):
         order = case.purchase_order
         show_summary = resource == 'po-reconciliation' and record_id in (None, case.pk)
-        summary = calculate(order, mode, details=record_id == case.pk) if show_summary else {}
+        summary = calculate(order, mode, details=record_id == case.pk, reference_reviews=case.reference_reviews, delivery_reviews=case.delivery_reviews) if show_summary else {}
         state['po-reconciliation'].append({
             'id': case.pk, 'orderId': order.pk, 'reference': order.po_reference_no,
             'partyId': getattr(order, party_key(mode)+'_id'), 'currency': order.currency,

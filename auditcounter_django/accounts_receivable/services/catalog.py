@@ -70,7 +70,7 @@ def fields(mode, target, lines=False):
     if lines:
         record = model(mode, record.__name__ + "Line")
     excluded = {"created_at", "updated_at", "imported_at", "llm_context", "received_items",
-                "proof_of_delivery", "proof_of_payment", "receiving_evidence", "payment_status"}
+                "proof_of_delivery", "proof_of_payment", "receiving_evidence", "payment_status", "reported_po_reference"}
     if target == "payment":
         excluded.remove("payment_status")
     return [field for field in record._meta.fields if not field.primary_key

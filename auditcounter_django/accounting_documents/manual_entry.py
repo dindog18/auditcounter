@@ -24,6 +24,8 @@ def is_manual(record):
 
 def editable_fields(mode, target, lines=False):
     result = fields(mode, target, lines)
+    if not lines and target in {'delivery_receipt', 'sales_invoice'}:
+        result.append(model(mode, target)._meta.get_field('reported_po_reference'))
     if not lines and not any(field.name == 'notes' for field in result):
         # Free text context is a document's notes, independent of extraction setup.
         result += [field for field in model(mode, target)._meta.fields

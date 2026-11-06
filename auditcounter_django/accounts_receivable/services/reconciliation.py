@@ -43,6 +43,8 @@ PRICE_TOLERANCE = Decimal(str(getattr(settings, "RECONCILIATION_PRICE_TOLERANCE"
 
 def validate_match(match: DocumentMatch) -> None:
     """Check three-way matching rules and prevent reuse of ordered or accepted quantities."""
+    from accounting_documents.references import same_reference
+
     errors = {}
     if not match.transaction_id or not match.invoice_line_id:
         return
@@ -127,13 +129,13 @@ def validate_match(match: DocumentMatch) -> None:
         if (
             order_line.item_code
             and invoice_line.item_code
-            and (order_line.item_code.casefold() != invoice_line.item_code.casefold())
+            and (order_line.item_code != invoice_line.item_code and not same_reference(order_line.item_code, invoice_line.item_code))
         ):
             errors["invoice_line"] = "Item code differs from the order."
         if (
             receipt_line.item_code
             and invoice_line.item_code
-            and (receipt_line.item_code.casefold() != invoice_line.item_code.casefold())
+            and (receipt_line.item_code != invoice_line.item_code and not same_reference(receipt_line.item_code, invoice_line.item_code))
         ):
             errors["delivery_receipt_line"] = "Received item differs from the invoice."
     if match.match_status == match.Status.MATCHED and match.matched_quantity > ZERO:

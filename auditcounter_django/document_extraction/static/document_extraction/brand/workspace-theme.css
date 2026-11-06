@@ -95,6 +95,28 @@
 .biz-app :is(.form-control,.form-select):disabled { background-color: var(--biz-color-disabled-bg); color: var(--biz-color-disabled-text); }
 .biz-app .form-check-input { border-color: var(--biz-color-border-control); background-color: var(--biz-color-bg-surface); width: 18px; height: 18px; }
 .biz-app .form-check-input:checked { background-color: var(--biz-color-brand-accent); border-color: var(--biz-color-brand-accent); }
+.biz-app .form-switch { display: flex; flex-direction: row; align-items: center; gap: 8px; padding-inline-start: 0; }
+.biz-app .form-switch .form-check-input {
+  appearance: none;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 20px;
+  min-height: 20px;
+  float: none;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--biz-color-bg-surface) radial-gradient(circle, var(--biz-color-border-control) 65%, transparent 72%) left 3px center / 12px 12px no-repeat;
+  cursor: pointer;
+}
+.biz-app .form-switch .form-check-input:checked {
+  background: var(--biz-color-action-default) radial-gradient(circle, var(--biz-color-action-text) 65%, transparent 72%) right 3px center / 12px 12px no-repeat;
+  border-color: var(--biz-color-action-default);
+}
+.biz-app .form-switch .form-check-input:focus-visible { outline: 2px solid var(--biz-color-focus); outline-offset: 2px; }
+.biz-app .form-switch .form-check-label { cursor: pointer; }
+@media (forced-colors: active) {
+  .biz-app .form-switch .form-check-input { appearance: auto; background: none; }
+}
 .biz-app .btn { border-radius: 4px; font-weight: 500; font-size: 13px; box-shadow: none; transition: background-color .12s, border-color .12s; }
 .biz-app :is(.btn-primary,.btn-falcon-primary) { --falcon-btn-color: var(--biz-color-action-text); --falcon-btn-bg: var(--biz-color-action-default); --falcon-btn-border-color: var(--biz-color-action-default); --falcon-btn-hover-color: var(--biz-color-action-text); --falcon-btn-hover-bg: var(--biz-color-action-hover); --falcon-btn-hover-border-color: var(--biz-color-action-hover); --falcon-btn-active-color: var(--biz-color-action-text); --falcon-btn-active-bg: var(--biz-color-action-active); --falcon-btn-active-border-color: var(--biz-color-action-active); color: var(--biz-color-action-text); background: var(--biz-color-action-default); border-color: var(--biz-color-action-default); }
 .biz-app :is(.btn-primary,.btn-falcon-primary):hover { color: var(--biz-color-action-text); background: var(--biz-color-action-hover); border-color: var(--biz-color-action-hover); }

@@ -23,18 +23,18 @@ class POReconciliationTests(TestCase):
             item_code='ITEM', unit_of_measure='ea', quantity_ordered=10, unit_price=10, line_total=100)
         return order
 
-    def receipt(self, mode, order, accepted=8):
+    def receipt(self, mode, order, accepted=8, reference="DR"):
         receipt = model(mode, 'delivery_receipt').objects.create(**{party_key(mode): self.accounts[mode]},
-            purchase_order=order, dr_reference_no='DR', delivery_date='2026-11-05',
+            purchase_order=order, dr_reference_no=reference, delivery_date='2026-11-05',
             **{'receipt_status' if mode == 'ap' else 'delivery_status': 'accepted' if mode == 'ap' else 'delivered'})
         model(mode, type(receipt).__name__+'Line').objects.create(delivery_receipt=receipt, line_no=1,
             item_code='ITEM', unit_of_measure='ea', quantity_stated=10, quantity_received=10,
             quantity_accepted=accepted, quantity_rejected=10-accepted)
         return receipt
 
-    def invoice(self, mode, order):
+    def invoice(self, mode, order, reference="INV"):
         invoice = model(mode, 'sales_invoice').objects.create(**{party_key(mode): self.accounts[mode]},
-            purchase_order=order, invoice_reference_no='INV', invoice_date='2026-11-05', currency='PHP',
+            purchase_order=order, invoice_reference_no=reference, invoice_date='2026-11-05', currency='PHP',
             subtotal=100, total_amount=100, invoice_status='posted')
         model(mode, type(invoice).__name__+'Line').objects.create(invoice=invoice, line_no=1,
             item_code='ITEM', unit_of_measure='ea', quantity_invoiced=10, unit_price=10, line_total=100)
@@ -292,6 +292,65 @@ class POReconciliationTests(TestCase):
             receipt.save()
             self.assertEqual(self.case(mode, order).status, 'partial')
 
+    def test_delivery_matches_can_be_confirmed_before_an_invoice(self):
+        from accounts_receivable.services.catalog import revision
+
+        examples = [('GR-RT303WE-PMH(52)', 'GRRT303WEPMH(52)'), ('MT02W90', 'MT02W90')]
+        for mode in ('ap', 'ar'):
+            for index, (po_code, delivery_code) in enumerate(examples):
+                with self.subTest(mode=mode, model=po_code):
+                    slug = 'accounts-payable' if mode == 'ap' else 'accounts-receivable'
+                    order = self.order(mode, str(index))
+                    po_line = order.lines.get()
+                    po_line.item_code, po_line.unit_of_measure = po_code, ''
+                    po_line.save()
+                    receipt_line = self.receipt(mode, order, accepted=10, reference=f'DR-{index}').lines.get()
+                    receipt_line.item_code, receipt_line.unit_of_measure = delivery_code, 'PCS'
+                    receipt_line.save()
+                    case = self.case(mode, order)
+                    endpoint = f'/{slug}/api/po-delivery-review/{case.pk}/'
+                    detail_url = f'/{slug}/po-reconciliation/{case.pk}/'
+
+                    def detail():
+                        state = self.client.get(detail_url).context['finance_state']
+                        return next(row for row in state['po-reconciliation'] if row['id'] == case.pk)
+
+                    before = detail()
+                    suggestion = next(row['deliveryChecks'][0] for row in before['quantityChecks'] if row['deliveryChecks'])
+                    self.assertEqual([line['id'] for line in suggestion['candidates']], [po_line.pk])
+                    payload = {'receiptLineId': receipt_line.pk, 'orderLineId': po_line.pk,
+                               'revision': before['revision']}
+                    response = self.client.post(endpoint, payload, content_type='application/json')
+                    self.assertEqual(response.status_code, 200, response.content)
+                    after = detail()
+                    self.assertEqual(after['documentStatus'], 'awaiting_invoice')
+                    self.assertEqual(len(after['quantityChecks']), 1)
+                    row = after['quantityChecks'][0]
+                    self.assertEqual((row['ordered'], row['accepted'], row['invoiced']), (10, 10, 0))
+                    self.assertTrue(row['deliveryChecks'][0]['review'])
+                    self.assertFalse(row['hasDifference'])
+                    self.assertEqual(self.client.post(endpoint, payload, content_type='application/json').status_code, 409)
+
+                    invoice = self.invoice(mode, order, reference=f'INV-{index}')
+                    invoice_line = invoice.lines.get()
+                    invoice_line.item_code, invoice_line.unit_of_measure = delivery_code, 'PCS'
+                    invoice_line.save()
+                    case.refresh_from_db()
+                    response = self.client.post(f'/{slug}/api/po-line-review/{case.pk}/', {
+                        'invoiceLineId': invoice_line.pk, 'revision': revision(case),
+                        'matches': [{'orderLineId': po_line.pk, 'receiptLineId': receipt_line.pk,
+                                     'quantity': '10', 'note': 'Verified against the confirmed delivery.'}],
+                    }, content_type='application/json')
+                    self.assertEqual(response.status_code, 200, response.content)
+                    self.assertEqual(detail()['documentStatus'], 'matched')
+                    case.refresh_from_db()
+                    response = self.client.post(endpoint, {
+                        'receiptLineId': receipt_line.pk, 'orderLineId': None, 'revision': revision(case),
+                    }, content_type='application/json')
+                    self.assertEqual(response.status_code, 200, response.content)
+                    case.refresh_from_db()
+                    self.assertFalse(case.delivery_reviews)
+
     def test_po_line_review_uses_legacy_matches_and_recalculates_the_same_case(self):
         from accounts_receivable.services.catalog import revision
 
@@ -333,7 +392,8 @@ class POReconciliationTests(TestCase):
                 case.refresh_from_db()
                 self.assertEqual(case.status, 'exception')
                 self.assertEqual(self.client.post(endpoint, payload, content_type='application/json').status_code, 409)
-                row = {'orderLineId': order.lines.get().pk, 'receiptLineId': receipt_line.pk, 'quantity': '10'}
+                row = {'orderLineId': order.lines.get().pk, 'receiptLineId': receipt_line.pk, 'quantity': '10',
+                       'note': 'Verified uncoded items against the PO.'}
                 payload.update(matches=[row], revision=revision(case))
                 response = self.client.post(endpoint, payload, content_type='application/json')
                 self.assertEqual(response.status_code, 200, response.content)
@@ -342,3 +402,109 @@ class POReconciliationTests(TestCase):
                 payload.update(matches=[{**row, 'quantity': '11'}], revision=revision(case))
                 self.assertEqual(self.client.post(endpoint, payload, content_type='application/json').status_code, 400)
                 self.assertEqual(legacy.line_matches.get().matched_quantity, Decimal('10'))
+
+    def test_reported_po_variant_requires_a_link_and_review_in_both_workflows(self):
+        from accounting_documents.reconciliation import calculate
+        from accounts_receivable.services.catalog import revision
+        from accounts_receivable.services.extraction import save_result
+
+        for mode, slug in (('ap', 'accounts-payable'), ('ar', 'accounts-receivable')):
+            with self.subTest(mode=mode):
+                order = self.order(mode)
+                self.receipt(mode, order, accepted=10)
+                config = model(mode, 'ExtractionConfiguration')(target_entity='sales_invoice')
+                invoice = save_result(mode, config, {'record': {
+                    party_key(mode): mode, 'purchase_order': 'PO1', 'invoice_reference_no': 'INV',
+                    'invoice_date': '2026-11-05', 'currency': 'PHP', 'subtotal': '100',
+                    'total_amount': '100', 'invoice_status': 'posted',
+                }, 'lines': [{'item_code': 'ITEM', 'unit_of_measure': 'ea', 'quantity_invoiced': '10',
+                              'unit_price': '10', 'line_total': '100'}]})
+                self.assertIsNone(invoice.purchase_order_id)
+                self.assertEqual(invoice.reported_po_reference, 'PO1')
+                summary = calculate(order, mode, details=True)
+                self.assertEqual(summary['unlinkedCandidates'][0]['id'], invoice.pk)
+                invoice.refresh_from_db()
+                response = self.client.post(f'/{slug}/api/document-po/{invoice.pk}/', {
+                    'resource': 'invoices', 'purchaseOrderId': order.pk, 'revision': revision(invoice),
+                }, content_type='application/json')
+                self.assertEqual(response.status_code, 200, response.content)
+                case = self.case(mode, order)
+                self.assertEqual(case.status, 'exception')
+                endpoint = f'/{slug}/api/po-reference-review/{case.pk}/'
+                review = {'resource': 'invoices', 'documentId': invoice.pk,
+                          'reason': 'Confirmed against the original PO', 'revision': revision(case)}
+                response = self.client.post(endpoint, review, content_type='application/json')
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(response.json()['status'], 'awaiting_payment')
+                self.assertEqual(self.client.post(endpoint, review, content_type='application/json').status_code, 409)
+                case.refresh_from_db()
+                page = self.client.get(f'/{slug}/po-reconciliation/{case.pk}/')
+                row = next(row for row in page.context['finance_state']['po-reconciliation'] if row['id'] == case.pk)
+                self.assertEqual(row['documentStatus'], 'matched')
+                self.assertEqual(row['referenceChecks'][-1]['reason'], review['reason'])
+                order.po_reference_no = 'PO--1'
+                order.save()
+                self.assertEqual(self.case(mode, order).status, 'exception')
+
+    def test_model_variance_needs_explicit_allocation_and_remains_visible(self):
+        from accounting_documents.reconciliation import calculate
+        from accounts_receivable.services.catalog import revision
+
+        for mode, slug in (('ap', 'accounts-payable'), ('ar', 'accounts-receivable')):
+            with self.subTest(mode=mode):
+                order = self.order(mode)
+                receipt_line = self.receipt(mode, order, accepted=10).lines.get()
+                invoice_line = self.invoice(mode, order).lines.get()
+                order_line = order.lines.get()
+                order_line.item_code = 'MODEL-1'
+                order_line.save()
+                receipt_line.item_code = invoice_line.item_code = 'MODEL1'
+                receipt_line.save()
+                invoice_line.save()
+                case = self.case(mode, order)
+                self.assertEqual(case.status, 'exception')
+                summary = calculate(order, mode, details=True)
+                self.assertIn('Possible PO model: MODEL-1', str(summary['lineReviews']))
+                endpoint = f'/{slug}/api/po-line-review/{case.pk}/'
+                match = {'orderLineId': order_line.pk, 'receiptLineId': receipt_line.pk, 'quantity': '10'}
+                payload = {'invoiceLineId': invoice_line.pk, 'revision': revision(case), 'matches': [match]}
+                self.assertEqual(self.client.post(endpoint, payload, content_type='application/json').status_code, 400)
+                match['note'] = 'Verified the manufacturer model'
+                result = self.client.post(endpoint, payload, content_type='application/json')
+                self.assertEqual(result.status_code, 200, result.content)
+                summary = calculate(order, mode, details=True)
+                self.assertEqual(summary['documentStatus'], 'matched')
+                reviewed = summary['lineReviews'][invoice_line.pk]['reviewedDifferences']
+                self.assertIn('MODEL-1', reviewed[0]['evidence'])
+                self.assertEqual(reviewed[0]['note'], 'Verified the manufacturer model')
+                receipt_line.item_code = 'MODEL2'
+                with self.assertRaises(ValidationError):
+                    receipt_line.save()
+                case.refresh_from_db()
+                result = self.client.post(f'/{slug}/api/po-line-review/{case.pk}/', {
+                    'invoiceLineId': invoice_line.pk, 'revision': revision(case), 'matches': [],
+                }, content_type='application/json')
+                self.assertEqual(result.status_code, 200, result.content)
+                self.assertEqual(self.case(mode, order).status, 'exception')
+
+    def test_header_totals_cannot_hide_unbilled_quantities_or_missing_lines(self):
+        from accounting_documents.reconciliation import calculate
+
+        for mode in ('ap', 'ar'):
+            with self.subTest(mode=mode):
+                order = self.order(mode)
+                self.receipt(mode, order, accepted=10)
+                invoice = self.invoice(mode, order)
+                # A free item carries quantity but has no effect on the order total.
+                model(mode, type(order).__name__ + 'Line').objects.create(
+                    purchase_order=order, line_no=2, item_code='FREE', unit_of_measure='ea',
+                    quantity_ordered=1, unit_price=0, line_total=0,
+                )
+                summary = calculate(order, mode, details=True)
+                self.assertEqual(summary['documentStatus'], 'partial')
+                free = next(row for row in summary['quantityChecks'] if row['model'] == 'FREE')
+                self.assertEqual((free['ordered'], free['accepted'], free['invoiced']), (1, 0, 0))
+                invoice.lines.all().delete()
+                summary = calculate(order, mode, details=True)
+                self.assertEqual(summary['documentStatus'], 'partial')
+                self.assertIn('INV has no line items.', summary['missingLines'])

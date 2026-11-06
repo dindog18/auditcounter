@@ -13,6 +13,8 @@ class StyledForm(forms.Form):
     def style(self):
         for field in self.fields.values():
             field.widget.attrs["class"] = "form-check-input" if isinstance(field.widget, forms.CheckboxInput) else "form-select" if isinstance(field.widget, forms.Select) else "form-control"
+        if "enabled" in self.fields:
+            self.fields["enabled"].widget.attrs["role"] = "switch"
 
 
 class ConnectionForm(forms.ModelForm):
