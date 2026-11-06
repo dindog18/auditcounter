@@ -21,6 +21,10 @@ def perform(request, mode, action, record_id=None):
             from accounting_documents.line_review import save_review
             case = save_review(mode, record_id, data)
             return JsonResponse({'id': case.pk, 'status': case.status})
+        if action == 'po-close-unserved' and record_id:
+            from accounting_documents.unserved import save_unserved
+            case = save_unserved(mode, record_id, data)
+            return JsonResponse({'id': case.pk, 'status': case.status})
         if action == 'po-delivery-review' and record_id:
             from accounting_documents.delivery_review import save_delivery_review
             case = save_delivery_review(mode, record_id, data)

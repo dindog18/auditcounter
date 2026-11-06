@@ -29,25 +29,27 @@
         </div>
         <div class="collapse navbar-collapse" id="navbarVerticalCollapse">
           <div class="navbar-vertical-content scrollbar">
+            <div class="navbar-vertical-label mt-3 mb-2 px-3">Document extraction</div>
+            <ul class="navbar-nav flex-column mb-3">
+              <li class="nav-item"><a class="nav-link {% if section == 'upload' %}active{% endif %}" {% if section == 'upload' %}aria-current="page"{% endif %} href="{% url 'DOC_EXTRACTION:document_upload' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-cloud-upload-alt" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Upload documents</span></div></a></li>
+              <li class="nav-item"><a class="nav-link {% if section == 'batches' %}active{% endif %}" {% if section == 'batches' %}aria-current="page"{% endif %} href="{% url 'DOC_EXTRACTION:batch_list' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-folder-open" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Batches</span></div></a></li>
+              <li class="nav-item"><a class="nav-link {% if section == 'documents' %}active{% endif %}" {% if section == 'documents' %}aria-current="page"{% endif %} href="{% url 'DOC_EXTRACTION:document_list' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-file-alt" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Documents</span></div></a></li>
+            </ul>
+            <div class="navbar-vertical-label mt-3 mb-2 px-3">Database connection</div>
+            <ul class="navbar-nav flex-column mb-3">
+              <li class="nav-item"><a class="nav-link {% if section == 'databases' %}active{% endif %}" {% if section == 'databases' %}aria-current="page"{% endif %} href="{% url 'DB_EXTRACTION:source_list' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-database" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Database connections</span></div></a></li>
+            </ul>
+            <div class="navbar-vertical-label mt-3 mb-2 px-3">Document routing</div>
+            <ul class="navbar-nav flex-column mb-3">
+              <li class="nav-item"><a class="nav-link {% if section == 'router' %}active{% endif %}" {% if section == 'router' %}aria-current="page"{% endif %} href="{% url 'ROUTER:queue' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-random" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Document routing</span></div></a></li>
+            </ul>
+            <div class="navbar-vertical-label mt-3 mb-2 px-3">Encoding &amp; integrations</div>
+            <ul class="navbar-nav flex-column mb-3" aria-label="Encoding and integrations"><li class="nav-item"><a class="nav-link {% if section == 'encoder' %}active{% endif %}" {% if section == 'encoder' %}aria-current="page"{% endif %} href="{% url 'ENCODER:dashboard' %}"><span class="nav-link-icon"><span class="fas fa-paper-plane" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Encoder</span></a></li></ul>
             <div class="navbar-vertical-label mt-3 mb-2 px-3">Financial operations</div>
             <ul class="navbar-nav flex-column mb-3">
               <li class="nav-item"><a class="nav-link {% if section == 'receivables' %}active{% endif %}" {% if section == 'receivables' %}aria-current="page"{% endif %} href="{% url 'ACCOUNTS_RECEIVABLE:overview' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-arrow-down" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Accounts receivable</span></div></a></li>
               <li class="nav-item"><a class="nav-link {% if section == 'payables' %}active{% endif %}" {% if section == 'payables' %}aria-current="page"{% endif %} href="{% url 'ACCOUNTS_PAYABLE:overview' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-arrow-up" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Accounts payable</span></div></a></li>
             </ul>
-            <div class="navbar-vertical-label mt-3 mb-2 px-3">Data &amp; documents</div>
-            <ul class="navbar-nav flex-column mb-3">
-              <li class="nav-item"><a class="nav-link {% if section == 'documents' %}active{% endif %}" {% if section == 'documents' %}aria-current="page"{% endif %} href="{% url 'DOC_EXTRACTION:document_list' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-file-alt" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Documents</span></div></a></li>
-              <li class="nav-item"><a class="nav-link {% if section == 'upload' %}active{% endif %}" {% if section == 'upload' %}aria-current="page"{% endif %} href="{% url 'DOC_EXTRACTION:document_upload' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-cloud-upload-alt" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Upload documents</span></div></a></li>
-              <li class="nav-item"><a class="nav-link {% if section == 'batches' %}active{% endif %}" {% if section == 'batches' %}aria-current="page"{% endif %} href="{% url 'DOC_EXTRACTION:batch_list' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-folder-open" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Batches</span></div></a></li>
-            </ul>
-            <ul class="navbar-nav flex-column mb-3">
-              <li class="nav-item"><a class="nav-link {% if section == 'router' %}active{% endif %}" {% if section == 'router' %}aria-current="page"{% endif %} href="{% url 'ROUTER:queue' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-random" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Document routing</span></div></a></li>
-            </ul>
-            <ul class="navbar-nav flex-column mb-3">
-              <li class="nav-item"><a class="nav-link {% if section == 'databases' %}active{% endif %}" {% if section == 'databases' %}aria-current="page"{% endif %} href="{% url 'DB_EXTRACTION:source_list' %}"><div class="d-flex align-items-center"><span class="nav-link-icon"><span class="fas fa-database" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Database connections</span></div></a></li>
-            </ul>
-            <div class="navbar-vertical-label mt-3 mb-2 px-3">Encoding &amp; integrations</div>
-            <ul class="navbar-nav flex-column mb-3" aria-label="Encoding and integrations"><li class="nav-item"><a class="nav-link {% if section == 'encoder' %}active{% endif %}" {% if section == 'encoder' %}aria-current="page"{% endif %} href="{% url 'ENCODER:dashboard' %}"><span class="nav-link-icon"><span class="fas fa-paper-plane" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Encoder</span></a></li></ul>
             <div class="navbar-vertical-label mt-3 mb-2 px-3">Manage</div>
             <ul class="navbar-nav flex-column mb-3"><li class="nav-item"><a class="nav-link {% if section == 'setup' %}active{% endif %}" href="{% url 'setup' %}" {% if section == 'setup' %}aria-current="page"{% endif %}><span class="nav-link-icon"><span class="fas fa-sliders-h" aria-hidden="true"></span></span><span class="nav-link-text ps-1">Settings &amp; setup</span>{% if setup_missing %}<span class="biz-setup-count" aria-label="{{ setup_missing }} setup steps remaining">{{ setup_missing }}</span>{% endif %}</a></li></ul>
             <div class="biz-sidebar-footer">Business, in order.<span>AuditCounter workspace</span></div>

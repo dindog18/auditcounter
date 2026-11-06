@@ -46,7 +46,7 @@ def receipt_accepts_lines(receipt):
     return receipt_status(receipt) in {'accepted', 'delivered', 'partial', 'partially_accepted'}
 
 
-def calculate(order, mode, *, details=False, reference_reviews=None, delivery_reviews=None):
+def calculate(order, mode, *, details=False, reference_reviews=None, delivery_reviews=None, unserved_closures=None):
     from accounts_receivable.services.catalog import party_key
     from accounts_receivable.services.extraction import validate_totals
     tolerance = Decimal(str(getattr(settings, 'RECONCILIATION_PRICE_TOLERANCE', '0.01')))
@@ -62,13 +62,16 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
     from .delivery_review import can_confirm, evidence
     from .line_review import scoped_matches, model_variance, validate_identity
     from .references import document_references, same_reference, unlinked_candidates
+    from .unserved import apply_closures
 
-    if reference_reviews is None or delivery_reviews is None:
+    if reference_reviews is None or delivery_reviews is None or unserved_closures is None:
         case = getattr(order, 'automatic_reconciliation', None)
         if reference_reviews is None:
             reference_reviews = case.reference_reviews if case else {}
         if delivery_reviews is None:
             delivery_reviews = case.delivery_reviews if case else {}
+        if unserved_closures is None:
+            unserved_closures = case.unserved_closures if case else {}
     references = document_references(order, receipts, invoices, reference_reviews)
     issues = [
         f'{row["reference"]}: reported PO “{row["reported"]}” differs from “{row["expected"]}”. '
@@ -93,6 +96,9 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
     order_lines = list(order.lines.all())
     order_lines_by_id = {line.pk: line for line in order_lines}
     delivery_keys = {}
+    confirmed_targets = {}
+    confirmed_delivery = defaultdict(lambda: ZERO)
+    allocated = defaultdict(lambda: ZERO)
     delivery_checks = defaultdict(list)
     ordered, accepted, billed, reviewed = (defaultdict(lambda: ZERO) for _ in range(4))
     terms = defaultdict(set)
@@ -133,6 +139,9 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
                 key = _line_key(target) if confirmed else source_key
                 delivery_keys[line.pk] = key
                 accepted[key] += line.quantity_accepted
+                if confirmed:
+                    confirmed_targets[line.pk] = target.pk
+                    confirmed_delivery[target.pk] += line.quantity_accepted
                 if details and order.status != 'cancelled' and same_account and line.quantity_accepted > ZERO:
                     candidates = [] if confirmed or source_key in ordered else [
                         {'id': item.pk, 'number': item.line_no, 'model': item.item_code, 'unit': item.unit_of_measure,
@@ -187,6 +196,8 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
                 ordered[order_key] -= quantity
                 accepted[delivery_keys[match.delivery_receipt_line_id]] -= quantity
                 reviewed[order_key] += quantity
+                if confirmed_targets.get(match.delivery_receipt_line_id) != match.purchase_order_line_id:
+                    allocated[match.purchase_order_line_id] += quantity
                 variance = model_variance(line, match.purchase_order_line, match.delivery_receipt_line)
                 if variance:
                     result['reviewedDifferences'].append({'evidence': variance, 'note': match.notes})
@@ -224,18 +235,28 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
     unassigned_shortage = False
     open_quantities = False
     quantity_checks = []
+    closed, closure_controls, closed_value = apply_closures(
+        order_lines, unserved_closures, ordered, accepted, billed, allocated, confirmed_delivery, issues,
+        details=details, active=order.status != 'cancelled' and bool(getattr(order, account)),
+    )
+    all_quantities_closed = (any(closed.values()) and all(ordered[key] == closed[key] for key in ordered)
+                             and not any(reviewed.values()))
+    fully_closed = all_quantities_closed and not invoices
+    expected_total = ZERO if all_quantities_closed else order.total_amount - closed_value
     for key in sorted(ordered.keys() | accepted.keys() | billed.keys()):
-        expected, delivered, invoiced = ordered[key], accepted[key], billed[key]
+        expected, delivered, invoiced = ordered[key] - closed[key], accepted[key], billed[key]
         manual = reviewed[key]
-        if expected == delivered == invoiced == manual == ZERO:
+        if expected == delivered == invoiced == manual == closed[key] == ZERO and not closure_controls[key]:
             continue
         label = key[0] or 'Missing model'
         messages = []
         if invoiced > expected:
-            messages.append('Invoiced quantity exceeds the PO.')
+            messages.append('Invoiced quantity exceeds the expected quantity after closure.'
+                            if closed[key] else 'Invoiced quantity exceeds the PO.')
             issues.append(f'{label}: {messages[-1]}')
         if delivered > expected:
-            messages.append('Accepted delivery exceeds the PO or uses a different model or unit.')
+            messages.append('Accepted delivery exceeds the expected quantity after closure.'
+                            if closed[key] else 'Accepted delivery exceeds the PO or uses a different model or unit.')
             # A formatting difference is explicit even if a likely model is found.
             variants = [candidate for candidate, unit in terms if same_reference(candidate, key[0]) and (candidate, unit) != key]
             if variants:
@@ -258,7 +279,11 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
             for _, _, result in candidates:
                 result['messages'].append(messages[-1])
         if details:
-            quantity_checks.append({'model': key[0], 'unit': key[1], 'ordered': expected + manual,
+            if closed[key] > ZERO:
+                messages.insert(0, f'{closed[key]:f} closed unserved. {expected + manual:f} still expected.')
+            quantity_checks.append({'model': key[0], 'unit': key[1], 'ordered': expected + manual + closed[key],
+                                    'expected': expected + manual, 'closedUnserved': closed[key],
+                                    'unservedControls': closure_controls[key],
                                     'accepted': delivered + manual, 'invoiced': invoiced + manual,
                                     'reviewed': manual, 'messages': messages, 'hasDifference': has_difference,
                                     'deliveryChecks': delivery_checks[key]})
@@ -267,8 +292,9 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
         for invoice_id, amount in shortages.items()
     )
     shortage_open = unassigned_shortage or bool(shortages) and not shortage_covered
-    if invoice_total > order.total_amount + tolerance:
-        issues.append('Invoice totals exceed the PO amount.')
+    if invoice_total > expected_total + tolerance:
+        issues.append('Invoice totals exceed the expected PO amount after unserved quantities were closed.'
+                      if closed_value else 'Invoice totals exceed the PO amount.')
     if payments > net_due + tolerance:
         payment_issues.append('Cleared payments exceed the invoice total less deductions.')
     if net_due < ZERO:
@@ -277,18 +303,22 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
         document_status = 'cancelled'
     elif issues:
         document_status = 'exception'
+    elif fully_closed and not pending_receipts and not missing_lines:
+        document_status = 'closed_unserved'
     elif not confirmed_receipts:
         document_status = 'awaiting_delivery'
     elif not invoices or any(row.invoice_status in {'draft', 'pending'} for row in invoices):
         document_status = 'awaiting_invoice'
     elif (missing_lines or pending_receipts or open_quantities or shortage_open
-          or abs(invoice_total-order.total_amount) > tolerance):
+          or abs(invoice_total-expected_total) > tolerance):
         document_status = 'partial'
     else:
         document_status = 'matched'
 
     if payment_issues:
         payment_status = 'exception'
+    elif document_status == 'closed_unserved':
+        payment_status = 'not_required'
     elif not invoices or any(row.invoice_status in {'draft', 'pending'} for row in invoices):
         payment_status = 'awaiting_invoice'
     elif abs(net_due-payments) <= tolerance:
@@ -307,25 +337,25 @@ def calculate(order, mode, *, details=False, reference_reviews=None, delivery_re
               'documentStatus': document_status, 'paymentStatus': payment_status}
     if details:
         pending_checks = []
-        if not confirmed_receipts:
+        if not confirmed_receipts and not fully_closed:
             pending_checks.append('No completed delivery receipt is linked.')
         elif pending_receipts:
             pending_checks.append('One or more linked delivery receipts still need a delivery decision.')
-        if not invoices:
+        if not invoices and not fully_closed:
             pending_checks.append('No active invoice is linked.')
         elif any(row.invoice_status in {'draft', 'pending'} for row in invoices):
             pending_checks.append('One or more linked invoices still need to be posted.')
-        if invoices and invoice_total < order.total_amount - tolerance:
-            pending_checks.append(f'Invoice totals are below the PO amount by {order.total_amount-invoice_total:.2f} {order.currency}.')
+        if invoices and invoice_total < expected_total - tolerance:
+            pending_checks.append(f'Invoice totals are below the expected PO amount by {expected_total-invoice_total:.2f} {order.currency}.')
         values.update(pendingChecks=pending_checks, receiptObservations=receipt_observations, lineReviews=line_results, documentIssues=issues, paymentIssues=payment_issues,
                       referenceChecks=references, unlinkedCandidates=list(unlinked_candidates(order, mode)), quantityChecks=quantity_checks, missingLines=missing_lines,
-                      deductionCoversShortage=shortage_covered)
+                      deductionCoversShortage=shortage_covered, expectedOrderTotal=expected_total, closedUnservedValue=closed_value)
     return values
 
 
 def refresh_case(case, mode):
     values = calculate(case.purchase_order, mode, reference_reviews=case.reference_reviews,
-                       delivery_reviews=case.delivery_reviews)
+                       delivery_reviews=case.delivery_reviews, unserved_closures=case.unserved_closures)
     values.pop('documentStatus')
     values.pop('paymentStatus')
     values['updated_at'] = timezone.now()

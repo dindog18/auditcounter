@@ -138,7 +138,7 @@ def workspace_state(mode, resource, record_id=None, setup_target=None):
     for case in model(mode, 'POReconciliation').objects.select_related('purchase_order'):
         order = case.purchase_order
         show_summary = resource == 'po-reconciliation' and record_id in (None, case.pk)
-        summary = calculate(order, mode, details=record_id == case.pk, reference_reviews=case.reference_reviews, delivery_reviews=case.delivery_reviews) if show_summary else {}
+        summary = calculate(order, mode, details=record_id == case.pk, reference_reviews=case.reference_reviews, delivery_reviews=case.delivery_reviews, unserved_closures=case.unserved_closures) if show_summary else {}
         state['po-reconciliation'].append({
             'id': case.pk, 'orderId': order.pk, 'reference': order.po_reference_no,
             'partyId': getattr(order, party_key(mode)+'_id'), 'currency': order.currency,

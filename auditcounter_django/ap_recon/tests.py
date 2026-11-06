@@ -292,6 +292,69 @@ class POReconciliationTests(TestCase):
             receipt.save()
             self.assertEqual(self.case(mode, order).status, 'partial')
 
+    def test_closing_unserved_quantity_reconciles_only_the_served_units(self):
+        from accounting_documents.reconciliation import calculate
+        from accounts_receivable.services.catalog import revision
+
+        for mode, slug in (('ap', 'accounts-payable'), ('ar', 'accounts-receivable')):
+            with self.subTest(mode=mode):
+                order = self.order(mode)
+                po_line = order.lines.get()
+                receipt_line = self.receipt(mode, order, accepted=8).lines.get()
+                case = self.case(mode, order)
+                url = f'/{slug}/api/po-close-unserved/{case.pk}/'
+
+                def close(quantity):
+                    case.refresh_from_db()
+                    return self.client.post(url, {
+                        'orderLineId': po_line.pk, 'quantity': quantity, 'revision': revision(case),
+                    }, content_type='application/json')
+
+                self.assertEqual(close('3').status_code, 400)
+                response = close('2')
+                self.assertEqual(response.status_code, 200, response.content)
+                invoice = self.invoice(mode, order)
+                invoice_line = invoice.lines.get()
+                invoice_line.quantity_invoiced = 8
+                invoice_line.line_total = 80
+                invoice_line.save()
+                invoice.subtotal = invoice.total_amount = 80
+                invoice.save()
+                summary = calculate(order, mode, details=True)
+                self.assertEqual(summary['documentStatus'], 'matched')
+                self.assertEqual(summary['expectedOrderTotal'], 80)
+                row = summary['quantityChecks'][0]
+                self.assertEqual((row['ordered'], row['closedUnserved'], row['expected']), (10, 2, 8))
+                self.assertEqual(order.lines.get().quantity_ordered, 10)
+
+                receipt_line.quantity_accepted = 10
+                receipt_line.quantity_rejected = 0
+                receipt_line.save()
+                self.assertEqual(self.case(mode, order).status, 'exception')
+                self.assertEqual(close(None).status_code, 200)
+                self.assertEqual(self.case(mode, order).status, 'partial')
+
+    def test_entire_po_can_close_unserved_without_delivery_or_invoice(self):
+        from accounting_documents.reconciliation import calculate
+        from accounts_receivable.services.catalog import revision
+
+        order = self.order('ar')
+        case = self.case('ar', order)
+        url = f'/accounts-receivable/api/po-close-unserved/{case.pk}/'
+        payload = {'orderLineId': order.lines.get().pk, 'quantity': '10', 'revision': revision(case)}
+        response = self.client.post(url, payload, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.case('ar', order).status, 'closed_unserved')
+        summary = calculate(order, 'ar', details=True)
+        self.assertEqual(summary['paymentStatus'], 'not_required')
+        self.assertEqual(summary['pendingChecks'], [])
+        self.assertEqual(self.client.post(url, payload, content_type='application/json').status_code, 409)
+
+        self.invoice('ar', order)
+        summary = calculate(order, 'ar', details=True)
+        self.assertEqual(summary['documentStatus'], 'exception')
+        self.assertTrue(summary['quantityChecks'][0]['hasDifference'])
+
     def test_delivery_matches_can_be_confirmed_before_an_invoice(self):
         from accounts_receivable.services.catalog import revision
 

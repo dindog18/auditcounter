@@ -23,14 +23,19 @@ window.BizmaticPOReconciliation = (() => {
     }
     const assessmentPill = (tone, label) => `<span class="recon-pill recon-${tone}"><span aria-hidden="true">${{good:'✓',bad:'!',waiting:'…',reviewed:'✓',neutral:'—'}[tone]}</span>${esc(label)}</span>`;
     function quantityState(check, record) {
+      const expected = Number(check.expected);
+      const closed = Number(check.closedUnserved);
+      if (check.hasDifference && closed) return ['bad', 'Quantity difference'];
+      if (closed && expected === 0) return ['reviewed', 'Closed unserved'];
       const deliveryConfirmed = check.deliveryChecks?.some(item => item.review);
       if (deliveryConfirmed && !check.hasDifference) {
-        return Number(check.accepted) === Number(check.ordered)
+        return Number(check.accepted) === expected
           ? ['reviewed', 'Delivery match confirmed'] : ['waiting', 'Awaiting remaining delivery'];
       }
-      if (!check.hasDifference && Number(check.invoiced) < Number(check.ordered) && check.unit?.trim()) {
-        return ['waiting', Number(check.accepted) < Number(check.ordered) ? 'Awaiting delivery' : 'Awaiting invoice'];
+      if (!check.hasDifference && Number(check.invoiced) < expected && check.unit?.trim()) {
+        return ['waiting', Number(check.accepted) < expected ? 'Awaiting delivery' : 'Awaiting invoice'];
       }
+      if (closed && Number(check.accepted) === expected && Number(check.invoiced) === expected) return ['reviewed', 'Reconciled after closure'];
       if (!deliveryConfirmed && (!check.model?.trim() || !check.unit?.trim())) return ['waiting', 'Missing identification'];
       if (check.messages.length) return record.documentStatus === 'matched'
         ? ['reviewed', 'Difference accounted for'] : ['bad', 'Quantity difference'];
@@ -60,7 +65,52 @@ window.BizmaticPOReconciliation = (() => {
       }).join('');
     }
 
+    function unservedControls(check) {
+      return check.unservedControls.map(line => {
+        const canClose = Number(line.available) > 0;
+        const hasClosure = Number(line.closed) > 0;
+        return `<details class="recon-line recon-neutral mt-2">
+          <summary><span>${canClose ? 'Close unserved quantity' : 'Manage closure'} · PO line ${esc(line.lineNumber)}</span></summary>
+          <form data-unserved-line="${line.lineId}" class="mt-2">
+            ${hasClosure ? `<p class="mb-2">${esc(line.closed)} units closed unserved.${line.stale ? ' The PO line changed. Reopen it to review the new quantity.' : ''}</p>` : ''}
+            ${canClose ? `<label class="form-label w-100">Quantity to close
+              <input type="number" class="form-control" name="quantity" min="0.0001" max="${esc(line.available)}" step="0.0001" value="${esc(line.available)}" required>
+            </label>
+            <p class="recon-row-description mb-2">These units will no longer be expected for delivery or invoicing.</p>
+            <button type="submit" class="btn btn-sm btn-primary">Close quantity</button>` : ''}
+            ${hasClosure ? '<button type="submit" value="reopen" formnovalidate class="btn btn-sm btn-falcon-default">Reopen closed quantity</button>' : ''}
+            <p class="text-danger mt-2 mb-0" role="alert" data-review-error hidden></p>
+          </form>
+        </details>`;
+      }).join('');
+    }
+
+    function bindUnservedControls(record) {
+      root.querySelectorAll('form[data-unserved-line]').forEach(form => {
+        form.addEventListener('submit', async event => {
+          event.preventDefault();
+          const buttons = form.querySelectorAll('[type="submit"]');
+          const error = form.querySelector('[data-review-error]');
+          const quantity = event.submitter?.value === 'reopen' ? null : form.elements.quantity.value;
+          buttons.forEach(button => { button.disabled = true; });
+          error.hidden = true;
+          try {
+            await window.BizmaticAccounting.post('po-close-unserved', record.id, {
+              orderLineId: Number(form.dataset.unservedLine), quantity, revision: record.revision,
+            });
+            location.hash = 'recon-quantities';
+            location.reload();
+          } catch (failure) {
+            error.textContent = failure.message;
+            error.hidden = false;
+            buttons.forEach(button => { button.disabled = false; });
+          }
+        });
+      });
+    }
+
     function assessmentOverview(record) {
+      const closed = record.documentStatus === 'closed_unserved';
       const references = record.referenceChecks || [];
       const referenceProblems = references.filter(row => ['format', 'conflict'].includes(row.status)).length;
       const candidates = record.unlinkedCandidates || [];
@@ -76,11 +126,11 @@ window.BizmaticPOReconciliation = (() => {
         {href:'recon-quantities', title:'Item quantities', tone:quantityProblems ? 'bad' : missing.length || quantityWaiting || !quantities.length ? 'waiting' : 'good',
           label:quantityProblems ? 'Review needed' : missing.length || quantityWaiting || !quantities.length ? 'Waiting for evidence' : 'Quantity checks complete',
           detail:quantityProblems ? `${quantityProblems} model / unit group(s) need attention` : `${quantityWaiting} incomplete · ${quantities.length - quantityProblems - quantityWaiting} matched`},
-        {href:'recon-lines', title:'Document match', tone:record.documentStatus === 'matched' ? 'good' : record.documentStatus === 'exception' ? 'bad' : 'waiting',
-          label:record.documentStatus === 'matched' ? 'Match confirmed' : record.documentStatus === 'exception' ? 'Differences found' : 'Incomplete',
+        {href:'recon-lines', title:'Document match', tone:closed || record.documentStatus === 'matched' ? 'good' : record.documentStatus === 'exception' ? 'bad' : 'waiting',
+          label:closed ? 'Closed unserved' : record.documentStatus === 'matched' ? 'Match confirmed' : record.documentStatus === 'exception' ? 'Differences found' : 'Incomplete',
           detail:'Models, prices, discounts, tax and document totals'},
-        {href:'recon-payments', title:'Payment settlement', tone:record.paymentStatus === 'settled' ? 'good' : record.paymentStatus === 'exception' ? 'bad' : 'waiting',
-          label:record.paymentStatus === 'settled' ? 'Settled' : record.paymentStatus === 'exception' ? 'Review needed' : record.paymentStatus === 'awaiting_invoice' ? 'Awaiting invoice' : 'Awaiting settlement',
+        {href:'recon-payments', title:'Payment settlement', tone:record.paymentStatus === 'not_required' || record.paymentStatus === 'settled' ? 'good' : record.paymentStatus === 'exception' ? 'bad' : 'waiting',
+          label:record.paymentStatus === 'not_required' ? 'No payment required' : record.paymentStatus === 'settled' ? 'Settled' : record.paymentStatus === 'exception' ? 'Review needed' : record.paymentStatus === 'awaiting_invoice' ? 'Awaiting invoice' : 'Awaiting settlement',
           detail:`${record.currency} ${money(record.outstanding)} outstanding`},
       ];
       const problems = [...new Set([...(record.documentIssues || []), ...(record.paymentIssues || [])])];
@@ -102,15 +152,16 @@ window.BizmaticPOReconciliation = (() => {
       const quantities = record.quantityChecks || [];
       const reviewNeeded = references.some(check => ['format', 'conflict'].includes(check.status));
       const reviewed = references.some(check => check.status === 'reviewed') || quantities.some(check => Number(check.reviewed) > 0 || check.deliveryChecks?.some(item => item.review));
+      const closed = record.documentStatus === 'closed_unserved' && !candidates.length;
       const complete = record.documentStatus === 'matched' && !candidates.length;
       const settled = record.paymentStatus === 'settled';
       const paymentException = record.paymentStatus === 'exception';
-      const title = complete && paymentException ? 'Three-way match confirmed. Payment settlement needs review.'
+      const title = closed ? 'PO closed unserved' : complete && paymentException ? 'Three-way match confirmed. Payment settlement needs review.'
         : complete
         ? record.deductionCoversShortage ? 'Documents reconciled with a deduction'
           : reviewed ? 'Three-way match confirmed after review' : 'Three-way match confirmed'
         : record.documentStatus === 'exception' || candidates.length ? 'Reconciliation needs attention' : 'Reconciliation is incomplete';
-      const notice = complete
+      const notice = closed ? 'All ordered quantities are closed. No delivery or invoice is expected.' : complete
         ? `${record.deductionCoversShortage ? 'An applied deduction covers the documented delivery shortfall.' : 'The PO, accepted deliveries, and invoices agree on item models, quantities, and amounts based on the supplied records.'} ${settled ? 'Payment settlement is complete.' : 'Payment settlement is tracked separately below.'}`
         : 'Review the differences and any missing evidence below before treating this case as complete.';
       const labels = {
@@ -137,7 +188,7 @@ window.BizmaticPOReconciliation = (() => {
         </form></details>` : ''}
       </li>`).join('');
       const potential = candidates.map(check => `<li>${link(check.resource, check.id)} reports PO <strong>${esc(check.reported)}</strong>. Open the document and confirm its PO link.</li>`).join('');
-      return `<div class="alert recon-verdict alert-${complete && !paymentException ? 'success' : 'warning'}" role="${complete && !paymentException ? 'status' : 'alert'}">
+      return `<div class="alert recon-verdict alert-${(complete || closed) && !paymentException ? 'success' : 'warning'}" role="${(complete || closed) && !paymentException ? 'status' : 'alert'}">
         <strong>${title}</strong> <div>${notice}</div>
       </div>` + assessmentOverview(record) + `<div id="recon-references" class="recon-anchor" tabindex="-1"></div>` + card('PO reference checks', `<div class="finance-card-body">
         ${potential ? `<p class="fw-semibold">Possible unlinked documents</p><ul>${potential}</ul>` : ''}
@@ -145,6 +196,7 @@ window.BizmaticPOReconciliation = (() => {
         ${checks ? `<ul class="recon-reference-list">${checks}</ul>` : '<p class="mb-0">Link a delivery receipt or invoice to check its PO reference.</p>'}
       </div>`) + `<div id="recon-quantities" class="recon-anchor" tabindex="-1"></div>` + card('Quantities by model and unit', `<div class="finance-card-body">
         <p>Accepted quantity excludes rejected units. Confirm a suggested delivery match here when you have verified the model and unit against the PO.</p>
+        ${Number(record.closedUnservedValue) > 0 ? `<p>Expected PO amount after closures <strong>${currency(record)} ${money(record.expectedOrderTotal)}</strong></p>` : ''}
         ${(record.pendingChecks || []).map(message => `<p class="text-700">${esc(message)}</p>`).join('')}
         ${(record.receiptObservations || []).map(message => `<p class="text-700">${esc(message)}</p>`).join('')}
         ${(record.missingLines || []).map(message => `<p class="text-danger">${esc(message)}</p>`).join('')}
@@ -156,7 +208,7 @@ window.BizmaticPOReconciliation = (() => {
           <tbody>${[...quantities].sort((a,b)=>({bad:0,waiting:1,reviewed:2,good:3}[quantityState(a,record)[0]])-({bad:0,waiting:1,reviewed:2,good:3}[quantityState(b,record)[0]])).map(check => `<tr data-quantity-state="${quantityState(check,record)[0]}" class="recon-quantity recon-${quantityState(check,record)[0]}">
             <th scope="row">${esc(check.model || 'Missing model')}</th><td>${esc(check.unit || 'Missing unit')}</td>
             <td>${esc(check.ordered)}</td><td>${esc(check.accepted)}</td><td>${esc(check.invoiced)}</td>
-            <td>${assessmentPill(...quantityState(check,record))}<div class="recon-row-description">${check.messages.map(esc).join(' ')}</div>${deliveryReview(check)}${record.invoiceIds.length && check.hasDifference ? '<a href="#recon-lines">Review invoice allocations →</a>' : ''}</td>
+            <td>${assessmentPill(...quantityState(check,record))}<div class="recon-row-description">${check.messages.map(esc).join(' ')}</div>${deliveryReview(check)}${unservedControls(check)}${record.invoiceIds.length && check.hasDifference ? '<a href="#recon-lines">Review invoice allocations →</a>' : ''}</td>
           </tr>`).join('')}</tbody>
         </table></div>` : '<p class="mb-0">No quantities to compare yet.</p>'}
       </div>`);
@@ -335,6 +387,7 @@ window.BizmaticPOReconciliation = (() => {
       }));
       bindReferenceReviews(record);
       bindDeliveryReviews(record);
+      bindUnservedControls(record);
       review.bind();
       return;
     }
