@@ -141,16 +141,19 @@ original configuration. Concurrent user edits invalidate an in-flight AI prepara
 
 Requests use signed, expiring payload confirmations and unique request IDs;
 reposting the same confirmation returns its prior attempt without another call.
-A job cannot execute concurrently or execute again after completion. Each explicit
-retry creates a separate attempt. There are no automatic mutation retries.
+Only one external operation can be in progress for a source document. A
+completed job cannot execute again. Each explicit retry creates a separate attempt. There are no automatic mutation retries.
 
 Timeouts, lost connections during a call, and tool-reported errors are recorded as
 **unknown outcome**, since the ERP may already have changed. A retry requires either:
 
-- an identical connection/tool/payload with a **documented** idempotency string
-  parameter configured in Reusable mapping (MCP Encoder supplies the stable job UUID); or
-- explicit confirmation that the user checked the ERP and the prior call did not
-  succeed. The reconciliation timestamp is retained on prior unknown attempts.
+- the same job with an unchanged connection, tool schema and payload, and a
+  **documented** idempotency string parameter configured in Reusable mapping
+  (MCP Encoder supplies the stable job UUID); or
+- explicit confirmation that the user checked the ERP and none of the listed
+  uncertain attempts succeeded. The list includes attempts from earlier routes
+  for the same source document. Older attempts without a saved retry fingerprint
+  also require this check.
 
 Never configure an arbitrary string field as an idempotency key. Actual deduplication
 is the target server's responsibility. Changed payloads after unknown outcomes also

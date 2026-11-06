@@ -45,9 +45,10 @@ def workspace(request, job_id):
     current_proposal = next((answer for answer in reversed(chat_messages)
                              if answer.cycle == job.cycle and answer.decision in {"accepted", "prepared"}
                              and answer.proposal.get("payload") == job.prepared_payload), None)
+    unknown_attempts = list(execution.outstanding_attempts(job).filter(status="unknown"))
     return render(request, "encoder/workspace.html", context(f"MCP Encoder job #{job.pk}", job=job, document=job.document,
         operation_form=OperationForm(job=job, selected_connection=request.GET.get("connection")), payload_form=PayloadForm(job=job), mapping_form=MappingForm(job=job),
-        token=execution.review_token(job), payload_json=json.dumps(job.prepared_payload, indent=2, ensure_ascii=False),
+        token=execution.review_token(job, unknown_attempts), unknown_attempts=unknown_attempts, payload_json=json.dumps(job.prepared_payload, indent=2, ensure_ascii=False),
         mappings_json=json.dumps(job.field_mappings, indent=2), source_json=json.dumps(mapping.source_data(job), indent=2, ensure_ascii=False),
         show_chat_history=show_history, reset_history=[{"cycle": row.cycle, "created_at": row.created_at, "snapshot": json.dumps(row.snapshot, indent=2, ensure_ascii=False)} for row in job.resets.all()],
         data_review=review(job.prepared_payload, job.tool_schema), review_warnings=current_proposal.proposal.get("issues", []) if current_proposal else [], chat_messages=chat_messages, executions=job.executions.all()))

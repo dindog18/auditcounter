@@ -9,6 +9,8 @@ from django.core import signing
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
+from mcp.client.stdio import get_default_environment
 
 from document_extraction.models import Document
 from router.models import DocumentRoute
@@ -17,12 +19,12 @@ from ..models import EncoderExecution, EncoderJob, MCPConnection
 from . import discovery, mcp_client, validation
 
 
-def identity(job):
+def retry_identity(job):
     connection = job.connection
     profile = settings.ENCODER_STDIO_SERVERS.get(connection.launch_profile, {})
-    content = {"job": job.pk, "revision": job.updated_at.isoformat(), "payload": job.prepared_payload,
+    content = {"job": job.pk, "payload": job.prepared_payload,
                "schema": job.tool_schema, "tool": job.tool_name, "connection": connection.pk,
-               "connection_revision": connection.updated_at.isoformat(), "profile": profile,
+               "profile": profile, "timeout": connection.timeout_seconds,
                "command": connection.command, "arguments": connection.arguments, "cwd": connection.working_directory,
                "inline_environment": connection.environment,
                "passthrough": {name: os.environ.get(name, "") for name in connection.environment_passthrough},
@@ -33,13 +35,38 @@ def identity(job):
                # Only the final digest leaves this function; never persist credential values.
                "environment": {name: os.environ.get(name, "") for name in profile.get("env", [])},
                "idempotency_field": job.idempotency_field}
-    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+    if connection.transport == "stdio":
+        content["stdio_defaults"] = get_default_environment()
+        content["server_cwd"] = os.getcwd()
+    else:
+        content["http_environment"] = {
+            name: value for name, value in os.environ.items()
+            if name.lower() in {"http_proxy", "https_proxy", "all_proxy", "no_proxy", "ssl_cert_file", "ssl_cert_dir"}
+        }
+    return salted_hmac("encoder-retry-identity", json.dumps(content, sort_keys=True), algorithm="sha256").hexdigest()
 
 
-def review_token(job):
+def identity(job):
+    revisions = f"{job.updated_at.isoformat()}:{job.connection.updated_at.isoformat()}"
+    return hashlib.sha256(f"{revisions}:{retry_identity(job)}".encode()).hexdigest()
+
+
+def outstanding_attempts(job):
+    return EncoderExecution.objects.filter(
+        job__route__routing_log__source_document=job.document,
+        status__in=["processing", "unknown"], reconciled_at__isnull=True,
+    ).order_by("pk")
+
+
+def review_token(job, unknown_attempts=None):
     if job.status != "ready" or not job.connection_id:
         return ""
-    return signing.dumps({"identity": identity(job), "request_id": str(uuid.uuid4()), "job": job.pk}, salt="encoder-execute")
+    if unknown_attempts is None:
+        unknown_attempts = outstanding_attempts(job).filter(status="unknown")
+    return signing.dumps({
+        "identity": identity(job), "request_id": str(uuid.uuid4()), "job": job.pk,
+        "unknown_attempt_ids": [attempt.pk for attempt in unknown_attempts],
+    }, salt="encoder-execute")
 
 
 def route_approved(job):
@@ -63,7 +90,7 @@ def execute(job_id, token, *, confirmed=False, reconciled=False):
         # Same lock order as Router/extraction prevents a simultaneous reroute.
         Document.objects.select_for_update().get(pk=initial.document.pk)
         DocumentRoute.objects.select_for_update().get(pk=initial.route_id)
-        job = EncoderJob.objects.select_for_update().select_related("connection", "route__routing_log__source_document", "route__destination").get(pk=job_id)
+        job = EncoderJob.objects.select_for_update(of=("self",)).select_related("connection", "route__routing_log__source_document", "route__destination").get(pk=job_id)
         if reviewed.get("job") != job.pk:
             raise ValidationError("This confirmation belongs to another job.")
         previous = EncoderExecution.objects.filter(request_id=reviewed["request_id"]).first()
@@ -78,17 +105,26 @@ def execute(job_id, token, *, confirmed=False, reconciled=False):
         issues = validation.errors(job.prepared_payload, job.tool_schema)
         if issues:
             raise ValidationError("Resolve payload validation issues before executing.")
-        last = job.executions.filter(status="unknown", reconciled_at__isnull=True).first()
-        if last and not reconciled:
-            if (not job.idempotency_field or last.connection_id != job.connection_id or last.tool_name != job.tool_name
-                    or last.payload != job.prepared_payload):
+        outstanding = list(outstanding_attempts(job))
+        if any(previous.status == "processing" for previous in outstanding):
+            raise ValidationError("Wait for the previous external operation on this document to finish.")
+        fingerprint = retry_identity(job)
+        if outstanding:
+            if reconciled:
+                attempt_ids = [previous.pk for previous in outstanding]
+                if reviewed.get("unknown_attempt_ids") != attempt_ids:
+                    raise ValidationError("The execution history changed. Reload and review the uncertain outcomes.")
+                EncoderExecution.objects.filter(pk__in=attempt_ids).update(reconciled_at=timezone.now())
+            elif not job.idempotency_field or any(
+                previous.job_id != job.pk or previous.connection_snapshot.get("retry_identity") != fingerprint
+                for previous in outstanding
+            ):
                 raise ValidationError("The previous external outcome is unknown. Verify externally that it did not succeed, then confirm reconciliation before retrying.")
-        if reconciled:
-            job.executions.filter(status="unknown", reconciled_at__isnull=True).update(reconciled_at=timezone.now())
         attempt = EncoderExecution.objects.create(request_id=reviewed["request_id"], job=job, cycle=job.cycle,
             connection=job.connection, tool_name=job.tool_name, tool_schema=job.tool_schema,
             payload=job.prepared_payload, connection_snapshot={"name": job.connection.name,
-                "launch_profile": job.connection.launch_profile, "revision": job.connection.updated_at.isoformat()})
+                "launch_profile": job.connection.launch_profile, "revision": job.connection.updated_at.isoformat(),
+                "retry_identity": fingerprint})
         job.status = "processing"
         job.save(update_fields=["status", "updated_at"])
     # Release database locks before bounded subprocess I/O. The job is now claimed.
