@@ -1,5 +1,9 @@
 # Document routing
 
+Open `/router/` for the review queue. Routing starts from
+[Documents or Batches](../document_extraction/README.md), and each matched route
+has separate processing and review states.
+
 Routing reads saved extraction text, evaluates active human-configured rules with
 one LLM, and saves zero, one, or multiple `DocumentRoute` decisions per attempt.
 Each successful LLM match automatically invokes AP/AR accounting extraction using

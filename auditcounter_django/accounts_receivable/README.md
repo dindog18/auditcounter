@@ -1,11 +1,21 @@
 > The primary AP/AR Extraction Setup now uses **Record First**. See [SETUP.md](SETUP.md) for its frontend/backend structure, real document/query tests, and confirmed-save protocol. The conversational endpoints below remain compatible with existing integrations.
 
-# AP and AR backend MVP
+# Accounts receivable and shared AP/AR backend
 
-The accounting workspaces read and write Django records. They do not load demo
-fixtures or browser storage. AP and AR keep separate document apps and reconciliation
-rules. See the [document app architecture and migration guide](../../docs/accounting-document-apps.md). Their identical workspace operations share small services in
-`accounts_receivable/services/`; each function receives `ap` or `ar` explicitly.
+Open `/accounts-receivable/` for customers, incoming payments, aging and
+reconciliation. AR owns customer accounts, allocations, saved line matching
+cases, extraction profiles and logs. The AR workspaces serve
+[customer purchase orders](../customer_purchase_order/README.md),
+[company delivery receipts](../company_delivery_receipt/README.md),
+[company invoices](../company_sales_invoice/README.md) and
+[customer payments](../customer_payment/README.md). A purchase order creates an
+[automatic reconciliation case](../ar_recon/README.md), which tracks linked
+documents, [deductions](../ar_deduction/README.md) and cleared payment allocations.
+
+[AP](../accounts_payable/README.md) uses the same workspace UI and extraction
+orchestration with an explicit `ap` or `ar` mode. Each workflow retains its own
+Django models and accounting history. See the
+[document app architecture and migration guide](../../docs/accounting-document-apps.md).
 
 ## Document workflow
 
@@ -67,19 +77,13 @@ between local and deployed instances. No database migration is required.
 
 ## Database workflow
 
-Create and refresh a PostgreSQL connection in Database extraction. In accounting
-Extraction setup, select its captured header/line tables, map fields, configure
-account lookups, key columns and joins, and submit the profile. Import records
-reads up to 100 headers per request using an explicit limit and offset. Each
-header supports up to 1,000 lines. Queries use a read-only transaction, quoted
-identifiers from metadata, and bound values. No user-entered SQL is executed.
-
-Each valid record saves atomically; a failed row does not erase successful rows.
-Imports save a `DatabaseImportRun` with the configuration snapshot and per-row
-outcomes. Request IDs prevent duplicate request execution. Duplicate policy can
-hold existing rows for review or skip them. Existing rows are never overwritten.
-Database source keys are compared by connection/schema/table across snapshots.
-Use a source account with SELECT permission on the configured business tables.
+Create and refresh a [PostgreSQL connection](../db_extraction/README.md). In the
+accounting register’s Extraction setup, prepare the query, map fields and
+source identities, and test the mapping. Review the full result before
+confirming a migration or later **Update data**. A successful confirmation
+saves the reviewed changes in one transaction and records a `DatabaseImportRun`.
+Queries use read-only source transactions, identifiers from the captured
+metadata and bound values. See the [migration and update guide](DATABASE_MIGRATION.md).
 
 ## Accounting actions
 
@@ -115,7 +119,7 @@ only on purchase orders.
 - Shared `services/configuration.py`: draft validation, submission and snapshots.
 - Shared `services/llm.py`, `assistant.py`: provider calls, logs and proposals.
 - Shared `services/extraction.py`: account resolution and atomic header/line saves.
-- Shared `services/imports.py`: bounded PostgreSQL imports and run history.
+- Shared `services/setup/`, `services/imports.py` and `services/database_updates.py`: query preparation, reviewed imports/updates and run history.
 - Shared `services/records.py`: account, case, match and allocation writes.
 - Shared `services/pages.py`, `http.py`: page data and JSON action handling.
 - `router/services/handoff.py`: automatic route extraction, approval, and retry status.

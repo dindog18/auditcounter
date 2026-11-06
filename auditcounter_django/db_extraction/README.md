@@ -117,8 +117,10 @@ Catalog implementation references:
 [constraints](https://www.postgresql.org/docs/current/catalog-pg-constraint.html),
 [Psycopg connections](https://www.psycopg.org/psycopg3/docs/api/connections.html).
 
-## Accounting document apps
+## Handoff to accounting
 
-Accounting documents now live in independent AP and AR Django apps. See the
-[document app architecture and migration guide](../../docs/accounting-document-apps.md)
-for model ownership, compatibility and migration details.
+In the AP or AR record register, **Extraction setup** can use a completed schema
+snapshot to build and test a mapping. The accounting workflow queries business
+rows with its own read-only query and review process. Confirmation saves data
+in AuditCounter’s application database. See the
+[accounting migration and update guide](../accounts_receivable/DATABASE_MIGRATION.md).

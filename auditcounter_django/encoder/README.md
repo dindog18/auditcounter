@@ -1,5 +1,12 @@
 # MCP Encoder (local MCP MVP)
 
+## Module structure
+
+- [urls.py](urls.py), [views.py](views.py) and [middleware.py](middleware.py) serve the `/encoder/` workspace and enforce local access.
+- [models.py](models.py) stores connections, reusable mappings, jobs, chat, execution attempts and reset history.
+- [services/handoff.py](services/handoff.py), [services/mapping.py](services/mapping.py), [services/validation.py](services/validation.py) and [services/chat.py](services/chat.py) prepare and troubleshoot routed drafts.
+- [services/discovery.py](services/discovery.py), [services/mcp_client.py](services/mcp_client.py) and [services/execution.py](services/execution.py) discover permitted tools and handle confirmed execution.
+
 MCP Encoder prepares external business operations from **existing routed extraction
 text**. It does not upload files, run OCR, or change AP/AR extraction. Pages use
 the shared Falcon layout, navigation, Django forms, CSRF controls, and original

@@ -174,6 +174,30 @@ Tests use a separate Django test database. Consult [CONTRIBUTING.md](CONTRIBUTIN
 
 Text extraction supports text-based PDFs, DOCX, Excel, TXT, and CSV. Scanned PDFs require an OCR workflow; legacy `.doc` files must be converted to `.docx`. Provider and model capabilities vary, and provider calls may incur charges. Static vendor assets and fonts include their own notices in the repository.
 
+## Module guide
+
+Start with the [Django project](auditcounter_django/auditcounter_django/README.md) for setup, URL routing and shared page help. Business data enters through uploaded documents, PostgreSQL or manual entry. AP and AR use their own document models and share accounting screens and services.
+
+| Workspace | Module README | Role in the flow |
+| --- | --- | --- |
+| `/documents/` | [Document extraction](auditcounter_django/document_extraction/README.md) | Store originals and review extracted text. |
+| `/router/` | [Router](auditcounter_django/router/README.md) | Classify reviewed or explicitly confirmed input and hand off matched routes. |
+| `/databases/` | [Database extraction](auditcounter_django/db_extraction/README.md) | Store PostgreSQL connection profiles and schema snapshots used by AP/AR setup. |
+| `/accounts-payable/` | [Accounts payable](auditcounter_django/accounts_payable/README.md) | Manage suppliers, outgoing payments and supplier-side workflows. |
+| `/accounts-receivable/` | [Accounts receivable](auditcounter_django/accounts_receivable/README.md) | Manage customers, incoming payments and customer-side workflows. |
+| `/encoder/` | [MCP Encoder](auditcounter_django/encoder/README.md) | Prepare a routed payload and run a permitted external operation after confirmation. |
+
+| Accounting record or workflow | AP module | AR module |
+| --- | --- | --- |
+| Purchase orders | [Company purchase order](auditcounter_django/company_purchase_order/README.md) | [Customer purchase order](auditcounter_django/customer_purchase_order/README.md) |
+| Delivery receipts | [Supplier delivery receipt](auditcounter_django/supplier_delivery_receipt/README.md) | [Company delivery receipt](auditcounter_django/company_delivery_receipt/README.md) |
+| Sales invoices | [Supplier sales invoice](auditcounter_django/supplier_sales_invoice/README.md) | [Company sales invoice](auditcounter_django/company_sales_invoice/README.md) |
+| Payments | [Company payment](auditcounter_django/company_payment/README.md) | [Customer payment](auditcounter_django/customer_payment/README.md) |
+| Deductions | [AP deductions](auditcounter_django/ap_deduction/README.md) | [AR deductions](auditcounter_django/ar_deduction/README.md) |
+| Automatic PO cases | [AP reconciliation](auditcounter_django/ap_recon/README.md) | [AR reconciliation](auditcounter_django/ar_recon/README.md) |
+
+[Shared accounting document services](auditcounter_django/accounting_documents/README.md) documents the rules both workflows use.
+
 ### MCP Encoder (local MCP MVP)
 
 The post-routing MCP Encoder workspace at `/encoder/` prepares dynamic MCP tool payloads
@@ -192,3 +216,21 @@ are unchanged; this selection controls reminders rather than access permissions.
 Database and MCP Encoder reminders are opt-in, while existing document, routing,
 AP/AR and assistant reminders keep their defaults. The Help button provides
 page-specific tours, including MCP connection setup and MCP Encoder execution review.
+
+### Ask AuditCounter
+
+On an instance with access restricted at the hosting layer, set
+`HELP_ASSISTANT_ENABLED=true` in `auditcounter_django/.env` and restart Django.
+Configure the existing `CONFIG_ASSISTANT_*` provider and chat model. Open
+**Help → Ask AuditCounter** for workflow guidance and links to relevant screens,
+or choose **Guided tour** for step-by-step help on the page.
+
+The help endpoint sends the question, up to three recent exchanges, the page
+type and shipped guidance to the configured provider. It has no tools or
+business record access. The conversation is held in the current page and clears
+on reload or with **Clear conversation**. AuditCounter does not save help
+messages, though the provider may retain requests under its own policy.
+Each request waits for a provider response with a 30-second HTTP timeout.
+The endpoint permits ten valid requests per minute per direct peer through
+Django’s cache. With the default local cache this applies per worker, and users
+behind a reverse proxy may share the same allowance.
